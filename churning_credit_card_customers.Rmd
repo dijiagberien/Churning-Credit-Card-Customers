@@ -13,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 # Background 
 
-Customer churn is the loss/turnover of a client. For this analysis, the goal is to predict/classify customers who will churn.
+Customer churn is the loss/turnover of a client. For this analysis, the goal is to predict/classify customers who will churn. We will begin by importing the necessary packages and performing some exploratory data analysis. 
 
 ```{r message = F, warning=F}
 # Clear working directory
@@ -22,7 +22,7 @@ rm(list = ls())
 # Import and load packages
 required_packages <- c("RColorBrewer", "cowplot", 
                        "lubridate", 
-                       "Hmisc", "psych",
+                       "Hmisc", "psych", "DataExplorer",
                        "tidyverse", "data.table", "knitr",
                        "mlr3", "mlr3learners", "mlr3viz")
 
@@ -34,7 +34,7 @@ packageCheck <- lapply(required_packages, FUN = function(x) {
 })
 ```
 
-```{r}
+```{r include = F}
 # Import data 
 bank_churn <- fread("C:/Users/diji_/Desktop/Data Science/Projects/Bank Churn/BankChurners.csv")
 ```
@@ -42,6 +42,18 @@ bank_churn <- fread("C:/Users/diji_/Desktop/Data Science/Projects/Bank Churn/Ban
 ```{r include = F}
 bank_churn <- bank_churn[, c(-22, -23)]
 ```
+
+What does our data look like? 
+
+```{r}
+# Print number of rows and columns
+dim(bank_churn)
+
+# Print the first 3 rows of the data 
+head(bank_churn, 3)
+```
+
+Below is information on what the variable names mean
 
 ```{r}
 # Print names of columns in the data table 
@@ -55,60 +67,81 @@ variable_meaning <- c("Client number", "Whether or not the customer churned", "A
 data.table(variable_names, variable_meaning) %>% setnames(c("Variable Name", "Variable Meaning")) %>% kable()
 ```
 
-Let us take a peek at the data 
-```{r}
-# Show the first 3 rows of the data 
-head(bank_churn, 3)
-```
-
 We have some bit of features here and our goal is to predict whether or not a customer will churn, as such our target feature is the Attrition_Flag. As shown below, the customers are either Existing or "Attrited", meaning they are no longer customers/clients. 
 
 ```{r}
 unique(bank_churn$Attrition_Flag)
 ```
 
-Next step is to perform some Exploratory Data Analysis (EDA) and pre-processing. Thus far, the only input feature I see that is not necessary to be included in our model is the "CLIENTNUM", The CLIENTNUM is just an identifier. I won't remove it just yet though, in accordance with the theme of EDA I'll make a plot to see the relationship between the client ID and Attrition Flag. We have no time variable to evaluate the churning through time. So, my maybe flawed logic is that the recent customers have higher client numbers than earlier customers...you know, customer 1, customer 2, ...., customer *n*, etc. 
+With our goal in mind of developing a model that can effectively predict whether or not a customer will churn, we have to think about how we will be splitting our data and evaluating our model. To sort of speak, we are more interested in informing whether the customer will churn, that we are in informing whether the customer will remain. 
 
-Let us encode the response variable with 1 representing that the customer churned and 0 representing otherwise. 
+From the table and as illustrated in the pie plot below, we see that approx 16% of the credit card customers churned. As such, we can expect a challenge in training our model to predict customers who will churn. This is because we have a relatively small subset of data that contains characteristics of customers who churned, as such, the effectiveness of the model can only be facilitated by having very dissimilar characteristics between customers who churned and those who didn't. 
 
-```{r}
-# Encode the response 
-bank_churn$Attrition_Flag <- factor(bank_churn$Attrition_Flag, levels = c("Existing Customer", "Attrited Customer"), 
-                                    labels = c(0, 1))
+```{r echo = F}
+# Create a table indicating churn proportions
+churn_proportion <- table(bank_churn$Attrition_Flag) %>% data.table() %>% setnames(new = c("Customer Group", "Count"))
+churn_proportion$`Percentage` <- round((churn_proportion$Count/sum(churn_proportion$Count))*100, 2)
+churn_proportion %>% kable()
 ```
 
 ```{r}
-ggplot() +
-  geom_point(aes(x = bank_churn$CLIENTNUM, y = bank_churn$Attrition_Flag)) +
-  xlab("Client Number") +
-  ylab("Churn (1) or No churn (0)") +
-  theme_classic()
+pie(churn_proportion$Count, labels = paste(churn_proportion$`Customer Group`, paste(churn_proportion$Percentage, sep = "", "%"), sep = ", "), col = c("red", "burlywood"), main = "Percantage of credit card customers who have churned.\n Total number of credit card customers: 10127")
 ```
-Damn, no cigar! 
 
-We proceed to data pre-processing, checking that each feature is of appropriate class, check for missing data, ... will feature scaling be necessary? 
+The fact that we have a small proportion of "Attrited Customer" in our data set gets us thinking about our model evaluation. I say this because say we have a model that predicts every customer will remain; if we test this model on our complete data set, and evaluate simply using accuracy percentage, then our will be right 83.93% of the time...simply misleading! Our model may very well be useless in detecting/predicting customer who will churn. 
+
+Let us continue with our data exploration and pre-processing. 
 
 ```{r}
 # Get the class of each variable
 data.table(`Variable Name` = variable_names, `Variable Class` = lapply(bank_churn, class)) %>% kable()
 ```
 
-From the table and as illustrated in the pie plot below, we see that approx 16% of the credit card customers churned. As such, we can expect a challenge in training our model to predict customers who will churn. This is because we have a relatively small subset of data that contains characteristics of customers who churned, as such, the effectiveness of the model can only be facilitated by having very dissimilar characteristics between customers who churned and those who didn't. 
+We have to convert character variables to factors.
 
-```{r echo = F}
-# Create a table indicating churn proportions
-churn_proportion <- table(bank_churn$Attrition_Flag) %>% data.table() %>% setnames(new = c("Activity", "Count"))
-churn_proportion$`Percentage` <- round((churn_proportion$Count/sum(churn_proportion$Count))*100, 2)
-churn_proportion %>% kable()
+```{r}
+# Select the character variables to be converted factors
+character_variables <- c("Gender", "Education_Level", "Marital_Status", "Income_Category", "Card_Category")
+
+# Convert the character variables to factors
+bank_churn[, (character_variables) := lapply(.SD, factor), .SDcols = character_variables]
 ```
 
-```{r echo = F}
-# Create a pie chart to illustrate churn proportion
-pie(churn_proportion$Count, labels = paste(factor(churn_proportion$Activity, levels = c(0, 1), labels = c("Existing customers", "Attrited customers")), sep = ", ", paste(churn_proportion$Percentage, sep = "", "%")), col = c("yellow4", "red"), 
-    main = "Percantage of credit card customers who have churned.\n Total number of credit card customers: 10127")
+Thus far, the only input feature I see that is not necessary to be included in our model is the "CLIENTNUM", The CLIENTNUM is just an identifier. I won't remove it just yet though, in accordance with the theme of EDA I'll make a plot to see the relationship between the client ID and Attrition Flag. We have no time variable to evaluate the churning through time. So, my maybe flawed logic is that the recent customers have higher client numbers than earlier customers...you know, customer 1, customer 2, ...., customer *n*, etc. 
+
+```{r}
+ggplot() +
+  geom_point(aes(x = bank_churn$CLIENTNUM, y = bank_churn$Attrition_Flag)) +
+  xlab("Client Number") +
+  ylab("Customer Group") +
+  theme_classic()
 ```
 
-The fact that we have a small proportion of attrited customers in our data set gets us thinking about our model evaluation. I say this because if we have a model that predicts that every customer will remain, then on our complete data it will be right 83.93% of the time, as such, could be misleading when utilizing the model on unseen/test data. 
+Damn, no cigar! But yes, visually, we confirm that the Client Number has no value in informing whether or not a client will churn. 
 
-still working .....
+Some important details to check for during EDA include
 
+  - The distribution of each variable
+    - some skewed distributions could be transformed to follow a normal distribution
+  - Examination of variables to possibly identify variables that could inform more on possibility of attrition
+  - Examine the proportion of the different factor variables...could be important when deciding how to split the data 
+
+```{r}
+# Bar plots informing the proportions within each factor variable
+plot_bar(bank_churn)
+
+# Metrics on the factor variables
+Hmisc::describe(bank_churn[, c("Attrition_Flag", "Gender", "Education_Level", "Marital_Status", "Income_Category", "Card_Category")])
+```
+
+The bar plot of the Attrition_Flag confirms what we already know i.e., we have a highly uneven proportion of attrited customers to existing customers. 
+
+```{r}
+# Histograms to inform on the distribution of each numerical variable
+plot_histogram(bank_churn)
+
+# Metrics on the numerical variables 
+Hmisc::describe(bank_churn[, !c("Attrition_Flag", "Gender", "Education_Level", "Marital_Status", "Income_Category", "Card_Category")])
+```
+
+# STILL WORKING ...
