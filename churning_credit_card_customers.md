@@ -187,7 +187,7 @@ We have to convert character variables to factors.
 
 ```r
 # Select the character variables to be converted factors
-character_variables <- c("Gender", "Education_Level", "Marital_Status", "Income_Category", "Card_Category")
+character_variables <- c("Attrition_Flag", "Gender", "Education_Level", "Marital_Status", "Income_Category", "Card_Category")
 
 # Convert the character variables to factors
 bank_churn[, (character_variables) := lapply(.SD, factor), .SDcols = character_variables]
@@ -297,7 +297,7 @@ Hmisc::describe(bank_churn[, c("Attrition_Flag", "Gender", "Education_Level", "M
 ## --------------------------------------------------------------------------------
 ```
 
-The bar plot of the Attrition_Flag confirms what we already know i.e., we have a highly uneven proportion of attrited customers to existing customers. 
+The bar plot of the Attrition_Flag confirms what we already know i.e., we have a highly uneven proportion of attrited customers to existing customers. Among the variables, Gender is the only feature with relatively close proportions; 52.9% are females and 47.1% are males. The other variables have skewed distributions and is something to consider when splitting the data into training and test sets. 
 
 
 ```r
@@ -448,3 +448,85 @@ Hmisc::describe(bank_churn[, !c("Attrition_Flag", "Gender", "Education_Level", "
 ## lowest : 0.000 0.004 0.005 0.006 0.007, highest: 0.990 0.992 0.994 0.995 0.999
 ## --------------------------------------------------------------------------------
 ```
+
+Building an effective model involves understanding the data, the goal of the project, and importantly, determining a valid method/metric of model evaluation. To demonstrate, consider the Random Forest model below: 
+
+----
+
+```r
+# Create the task 
+task = TaskClassif$new(id = "CreditCardChurners", backend = bank_churn, target = "Attrition_Flag")
+```
+
+
+```r
+# Split the data into training and test sets 
+set.seed(123)
+train_set = sample(task$row_ids, 0.8*task$nrow)
+test_set = setdiff(task$row_ids, train_set)
+```
+
+
+```r
+# Create a random forest learner 
+learner_rf = lrn("classif.ranger", importance = "permutation")
+learner_rf$train(task, row_ids = train_set)
+```
+
+
+```r
+# Illustrate feature importance
+importance = as.data.table(learner_rf$importance(), keep.rownames = TRUE)
+colnames(importance) = c("Feature", "Importance")
+ggplot(importance, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_col() + coord_flip() + xlab("")
+```
+
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-17-1.png)<!-- -->
+
+
+```r
+# Make predictions on the test set
+pred_rf = learner_rf$predict(task, row_ids = test_set)
+```
+
+
+```r
+# Create confusion matrix
+pred_rf$confusion
+```
+
+```
+##                    truth
+## response            Attrited Customer Existing Customer
+##   Attrited Customer               256                25
+##   Existing Customer                63              1682
+```
+
+
+```r
+# Print misclassification error rate 
+pred_rf$score(msr("classif.ce"))
+```
+
+```
+## classif.ce 
+## 0.04343534
+```
+
+The misclassification error rate here is approximately 0.04, as such we could naively conclude that our model would be right in its prediction 95.66% of the time. Definitely misleading! We are more interested in determining customers who will churn than we are in determining customers who will remain. Perhaps by understanding characteristics of customers who will churn, and in turn being able to make predictions of this possibility, we could device some strategies to reduce this churn rate. 
+
+It will be more fitting of us to choose a metric that informs on the likelihood of detecting customers who will churn. For example if we divided the false negative by the sum of the true positives and false negatives, i.e. False Negative Rate (FNR), we would then have an expected value of how often our model will fail to inform us that a customer will churn when indeed they will. 
+
+
+```r
+# Calculate the false negative rate 
+pred_rf$score(msr("classif.fnr"))
+```
+
+```
+## classif.fnr 
+##   0.1974922
+```
+
+So, the FNR informs that 19.75% of the time we will fail to predict that the customer will churn when indeed they will. Compared to the misclassification error rate which informs that our model will fail only 4.34% of the time. The misclassification error rate is less useful for this analysis. 
