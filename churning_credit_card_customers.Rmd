@@ -11,20 +11,22 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+##### NOTE: STILL WORKING!!! 
+
+
 # Background 
 
 Customer churn is the loss/turnover of a client. For this analysis, the goal is to predict/classify customers who will churn. We will begin by importing the necessary packages and performing some exploratory data analysis. 
 
-```{r message = F, warning=F}
-# Clear working directory
-rm(list = ls())
-
+```{r warning=F, message=F}
 # Import and load packages
 required_packages <- c("RColorBrewer", "cowplot", 
                        "lubridate", 
                        "Hmisc", "psych", "DataExplorer",
                        "tidyverse", "data.table", "knitr",
-                       "mlr3", "mlr3learners", "mlr3viz")
+                       "precrec", "rpart.plot", "smotefamily",
+                       "mlr3", "mlr3learners", "mlr3viz", 
+                       "mlr3filters", "mlr3pipelines", "mlr3tuning")
 
 packageCheck <- lapply(required_packages, FUN = function(x) {
   if(!require(x, character.only = TRUE)) {
@@ -34,70 +36,11 @@ packageCheck <- lapply(required_packages, FUN = function(x) {
 })
 ```
 
-```{r include = F}
-# Import data 
+```{r echo=F}
+# Import the data 
 bank_churn <- fread("C:/Users/diji_/Desktop/Data Science/Projects/Bank Churn/BankChurners.csv")
-```
-
-```{r include = F}
 bank_churn <- bank_churn[, c(-22, -23)]
 ```
-
-What does our data look like? 
-
-```{r}
-# Print number of rows and columns
-dim(bank_churn)
-
-# Print the first 3 rows of the data 
-head(bank_churn, 3)
-```
-
-Below is information on what the variable names mean
-
-```{r}
-# Print names of columns in the data table 
-variable_names <- names(bank_churn)
-
-# Meaning of names
-variable_meaning <- c("Client number", "Whether or not the customer churned", "Age of customer", "Sex of customer", "Number of dependents", 
-  "Educational qualification of the account holder", "Married, Single, Divorced or Unknown", "Annual income category of the account holder", "Type of card", "Period of relationship with the bank", "Total number of products held by the customer", "Number of months inactive in the last 12 months", "No of contacts in the last 12 months", "Credit limit on the credit card", "Total revolving balance on the credit card", "Open to buy credit line (Average of the last 12 months)", "Change in transaction amount (Q4/Q1)", "Total transaction amount in the last 12 months", "Total transaction count in the last 12 months", "Change in transaction count (Q4/Q1)", "Average card utilization ratio")
-
-# Print the variable names and their meanings
-data.table(variable_names, variable_meaning) %>% setnames(c("Variable Name", "Variable Meaning")) %>% kable()
-```
-
-We have some bit of features here and our goal is to predict whether or not a customer will churn, as such our target feature is the Attrition_Flag. As shown below, the customers are either Existing or "Attrited", meaning they are no longer customers/clients. 
-
-```{r}
-unique(bank_churn$Attrition_Flag)
-```
-
-With our goal in mind of developing a model that can effectively predict whether or not a customer will churn, we have to think about how we will be splitting our data and evaluating our model. To sort of speak, we are more interested in informing whether the customer will churn, that we are in informing whether the customer will remain. 
-
-From the table and as illustrated in the pie plot below, we see that approx 16% of the credit card customers churned. As such, we can expect a challenge in training our model to predict customers who will churn. This is because we have a relatively small subset of data that contains characteristics of customers who churned, as such, the effectiveness of the model can only be facilitated by having very dissimilar characteristics between customers who churned and those who didn't. 
-
-```{r echo = F}
-# Create a table indicating churn proportions
-churn_proportion <- table(bank_churn$Attrition_Flag) %>% data.table() %>% setnames(new = c("Customer Group", "Count"))
-churn_proportion$`Percentage` <- round((churn_proportion$Count/sum(churn_proportion$Count))*100, 2)
-churn_proportion %>% kable()
-```
-
-```{r}
-pie(churn_proportion$Count, labels = paste(churn_proportion$`Customer Group`, paste(churn_proportion$Percentage, sep = "", "%"), sep = ", "), col = c("red", "burlywood"), main = "Percantage of credit card customers who have churned.\n Total number of credit card customers: 10127")
-```
-
-The fact that we have a small proportion of "Attrited Customer" in our data set gets us thinking about our model evaluation. I say this because say we have a model that predicts every customer will remain; if we test this model on our complete data set, and evaluate simply using accuracy percentage, then our will be right 83.93% of the time...simply misleading! Our model may very well be useless in detecting/predicting customer who will churn. 
-
-Let us continue with our data exploration and pre-processing. 
-
-```{r}
-# Get the class of each variable
-data.table(`Variable Name` = variable_names, `Variable Class` = lapply(bank_churn, class)) %>% kable()
-```
-
-We have to convert character variables to factors.
 
 ```{r}
 # Select the character variables to be converted factors
@@ -105,96 +48,162 @@ character_variables <- c("Attrition_Flag", "Gender", "Education_Level", "Marital
 
 # Convert the character variables to factors
 bank_churn[, (character_variables) := lapply(.SD, factor), .SDcols = character_variables]
+
+# Select the integersvariables to be converted to numeric
+numeric_variables <- c("Customer_Age", "Total_Revolving_Bal", "Total_Trans_Amt")
+
+# Convert some integers to numeric
+bank_churn[, (numeric_variables) := lapply(.SD, as.numeric), .SDcols = numeric_variables]
+
+# Verify that classes have been appropriately set 
+lapply(bank_churn, class)
 ```
 
-Thus far, the only input feature I see that is not necessary to be included in our model is the "CLIENTNUM", The CLIENTNUM is just an identifier. I won't remove it just yet though, in accordance with the theme of EDA I'll make a plot to see the relationship between the client ID and Attrition Flag. We have no time variable to evaluate the churning through time. So, my maybe flawed logic is that the recent customers have higher client numbers than earlier customers...you know, customer 1, customer 2, ...., customer *n*, etc. 
-
-```{r}
-ggplot() +
-  geom_point(aes(x = bank_churn$CLIENTNUM, y = bank_churn$Attrition_Flag)) +
-  xlab("Client Number") +
-  ylab("Customer Group") +
-  theme_classic()
-```
-
-Damn, no cigar! But yes, visually, we confirm that the Client Number has no value in informing whether or not a client will churn. 
-
-Some important details to check for during EDA include
-
-  - The distribution of each variable
-    - some skewed distributions could be transformed to follow a normal distribution
-  - Examination of variables to possibly identify variables that could inform more on possibility of attrition
-  - Examine the proportion of the different factor variables...could be important when deciding how to split the data 
-
-```{r}
-# Bar plots informing the proportions within each factor variable
-plot_bar(bank_churn)
-
-# Metrics on the factor variables
-Hmisc::describe(bank_churn[, c("Attrition_Flag", "Gender", "Education_Level", "Marital_Status", "Income_Category", "Card_Category")])
-```
-
-The bar plot of the Attrition_Flag confirms what we already know i.e., we have a highly uneven proportion of attrited customers to existing customers. Among the variables, Gender is the only feature with relatively close proportions; 52.9% are females and 47.1% are males. The other variables have skewed distributions and is something to consider when splitting the data into training and test sets. 
-
-```{r}
-# Histograms to inform on the distribution of each numerical variable
-plot_histogram(bank_churn)
-
-# Metrics on the numerical variables 
-Hmisc::describe(bank_churn[, !c("Attrition_Flag", "Gender", "Education_Level", "Marital_Status", "Income_Category", "Card_Category")])
-```
-
-Building an effective model involves understanding the data, the goal of the project, and importantly, determining a valid method/metric of model evaluation. To demonstrate, consider the Random Forest model below: 
-
-----
 ```{r}
 # Create the task 
-task = TaskClassif$new(id = "CreditCardChurners", backend = bank_churn, target = "Attrition_Flag")
+task <- TaskClassif$new(id = "BankChurn", backend = bank_churn, target = "Attrition_Flag")
+print(task)
 ```
 
 ```{r}
-# Split the data into training and test sets 
-set.seed(123)
-train_set = sample(task$row_ids, 0.8*task$nrow)
-test_set = setdiff(task$row_ids, train_set)
+# Set CLIENTNUM as an identifier 
+task$set_col_roles("CLIENTNUM", roles = "name")
 ```
 
 ```{r}
-# Create a random forest learner 
-learner_rf = lrn("classif.ranger", importance = "permutation")
-learner_rf$train(task, row_ids = train_set)
+# Explore the task 
+as.data.table(task$col_info)
+task$col_roles
+table(task$truth()) # Class imbalance with Attrited customers being 1/5 less than Existing customers 
+task$positive
+Hmisc::describe(as.data.table(task))
 ```
 
 ```{r}
-# Illustrate feature importance
-importance = as.data.table(learner_rf$importance(), keep.rownames = TRUE)
-colnames(importance) = c("Feature", "Importance")
-ggplot(importance, aes(x = reorder(Feature, Importance), y = Importance)) +
-  geom_col() + coord_flip() + xlab("")
+# Split the task into training and test sets 
+train_set <- sample(task$nrow, 0.8*task$nrow)
+test_set <- setdiff(seq_len(task$nrow), train_set)
 ```
 
 ```{r}
-# Make predictions on the test set
-pred_rf = learner_rf$predict(task, row_ids = test_set)
+# Create learner 
+learner_dt <- lrn("classif.rpart")
 ```
 
 ```{r}
-# Create confusion matrix
-pred_rf$confusion
+# DECISION TREE MODEL; ORIGINAL DATA 
+# Do nothing sampler
+doing_nothing <- po("nop", id = "nop")
+
+# Create ML graph for undersampler
+doing_nothing_sampler <- doing_nothing %>>% 
+  learner_dt
+ 
+# Create a graph learner for undersampler
+graph_learner_doing_nothing_sampler <- GraphLearner$new(doing_nothing_sampler)
+
+# Train the undersampler decision tree model
+graph_learner_doing_nothing_sampler$train(task, train_set)
+
+# Show the state of the learner
+graph_learner_doing_nothing_sampler$state
 ```
 
 ```{r}
-# Print misclassification error rate 
-pred_rf$score(msr("classif.ce"))
+# Visualize undersampler decision tree model
+rpart.plot(graph_learner_doing_nothing_sampler$state$model$classif.rpart$model, cex = 0.6)
 ```
-
-The misclassification error rate here is approximately `r round(pred_rf$score(msr("classif.ce")), 2)`, as such we could naively conclude that our model would be right in its prediction `r round((1 - (pred_rf$score(msr("classif.ce"))))*100, 2)`% of the time. Definitely misleading! We are more interested in determining customers who will churn than we are in determining customers who will remain. Perhaps by understanding characteristics of customers who will churn, and in turn being able to make predictions of this possibility, we could device some strategies to reduce this churn rate. 
-
-It will be more fitting of us to choose a metric that informs on the likelihood of detecting customers who will churn. For example if we divided the false negative by the sum of the true positives and false negatives, i.e. False Negative Rate (FNR), we would then have an expected value of how often our model will fail to inform us that a customer will churn when indeed they will. 
 
 ```{r}
-# Calculate the false negative rate 
-pred_rf$score(msr("classif.fnr"))
+# Make predictions on the test set 
+prediction_dt <- graph_learner_doing_nothing_sampler$predict(task, test_set)
+
+# Show confusion matrix
+prediction_dt$confusion
+
+# Print sensitivity
+prediction_dt$score(msr("classif.sensitivity"))
+prediction_dt$score(msr("classif.ce"))
+prediction_dt$score(msr("classif.fbeta"))
+
+# DECISION TREE MODEL; UNDERSAMPLER
+# Create an undersampler 
+undersampler <- po("classbalancing", ratio = 1/5, reference = "major", adjust = "major", shuffle = F, id = "undersampler")
+
+# Create ML graph for undersampler
+dt_undersampler <- undersampler %>>% 
+  learner_dt
+
+# Create a graph learner for undersampler
+graph_learner_undersampler <- GraphLearner$new(dt_undersampler)
+
+# Train the undersampler decision tree model
+graph_learner_undersampler$train(task, train_set)
+
+# Show the state of the learner
+graph_learner_undersampler$state
+
+# Visualize undersampler decision tree model
+rpart.plot(graph_learner_undersampler$state$model$classif.rpart$model, cex = 0.6)
+
+# Make predictions on the test set 
+undersampler_prediction_dt <- graph_learner_undersampler$predict(task, test_set)
+
+# Show confusion matrix
+undersampler_prediction_dt$confusion
+
+# Print sensitivity
+undersampler_prediction_dt$score(msr("classif.sensitivity"))
+undersampler_prediction_dt$score(msr("classif.ce"))
+undersampler_prediction_dt$score(msr("classif.fbeta"))
+
+# DECISION TREE MODEL; OVERSAMPLER 
+# Create an oversampler 
+oversampler = po("classbalancing", ratio = 5, reference = "minor", adjust = "minor", shuffle = F, id = "oversampler")
+
+# Oversampler 
+dt_oversampler <- oversampler %>>% 
+  learner_dt
+
+# Create a graph learner for oversampler
+graph_learner_oversampler <- GraphLearner$new(dt_oversampler)
+
+# Train the oversampler decision tree model
+graph_learner_oversampler$train(task, train_set)
+
+# Show the state of the learner
+graph_learner_oversampler$state
 ```
 
-So, the FNR informs that `r round((pred_rf$score(msr("classif.fnr")))*100, 2)`% of the time we will fail to predict that the customer will churn when indeed they will. Compared to the misclassification error rate which informs that our model will fail only `r round((pred_rf$score(msr("classif.ce")))*100, 2)`% of the time. The misclassification error rate is less useful for this analysis. 
+```{r}
+# Visualize oversampler decision tree model
+rpart.plot(graph_learner_oversampler$state$model$classif.rpart$model, cex = 0.6)
+```
+
+```{r}
+# Make predictions on the test set 
+oversampler_prediction_dt <- graph_learner_oversampler$predict(task, test_set)
+
+oversampler_prediction_dt$confusion
+oversampler_prediction_dt$score(msr("classif.sensitivity"))
+oversampler_prediction_dt$score(msr("classif.ce"))
+oversampler_prediction_dt$score(msr("classif.fbeta"))
+```
+
+```{r warning = F, message = F}
+# Benchmarking 
+dt_benchmark <- benchmark_grid(tasks = task,
+                               learners = c(graph_learner_doing_nothing_sampler,
+                                            graph_learner_undersampler, 
+                                            graph_learner_oversampler), 
+                               resamplings = rsmp("cv", folds = 2))
+
+dt_bm_results <- benchmark(dt_benchmark)
+
+as.data.table(
+  dt_bm_results$aggregate(
+    c(msr("classif.ce"),
+      msr("classif.sensitivity"),
+      msr("classif.fbeta"))))[, c(
+        "learner_id", "classif.ce", "classif.sensitivity", "classif.fbeta")]
+```
