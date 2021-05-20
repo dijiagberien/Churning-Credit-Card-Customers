@@ -11,9 +11,6 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-##### NOTE: STILL WORKING!!! 
-
-
 # Background 
 
 Customer churn is the loss/turnover of a client. For this analysis, the goal is to predict/classify customers who will churn. We will begin by importing the necessary packages and performing some exploratory data analysis. 
@@ -61,7 +58,7 @@ lapply(bank_churn, class)
 
 ```{r}
 # Create the task 
-task <- TaskClassif$new(id = "BankChurn", backend = bank_churn, target = "Attrition_Flag")
+task <- TaskClassif$new(id = "BankChurn", backend = bank_churn, target = "Attrition_Flag", positive = "Attrited Customer")
 print(task)
 ```
 
@@ -101,10 +98,14 @@ doing_nothing_sampler <- doing_nothing %>>%
  
 # Create a graph learner for undersampler
 graph_learner_doing_nothing_sampler <- GraphLearner$new(doing_nothing_sampler)
+```
 
+```{r}
 # Train the undersampler decision tree model
 graph_learner_doing_nothing_sampler$train(task, train_set)
+```
 
+```{r}
 # Show the state of the learner
 graph_learner_doing_nothing_sampler$state
 ```
@@ -117,15 +118,21 @@ rpart.plot(graph_learner_doing_nothing_sampler$state$model$classif.rpart$model, 
 ```{r}
 # Make predictions on the test set 
 prediction_dt <- graph_learner_doing_nothing_sampler$predict(task, test_set)
+```
 
+```{r}
 # Show confusion matrix
 prediction_dt$confusion
+```
 
+```{r}
 # Print sensitivity
 prediction_dt$score(msr("classif.sensitivity"))
 prediction_dt$score(msr("classif.ce"))
 prediction_dt$score(msr("classif.fbeta"))
+```
 
+```{r}
 # DECISION TREE MODEL; UNDERSAMPLER
 # Create an undersampler 
 undersampler <- po("classbalancing", ratio = 1/5, reference = "major", adjust = "major", shuffle = F, id = "undersampler")
@@ -136,27 +143,41 @@ dt_undersampler <- undersampler %>>%
 
 # Create a graph learner for undersampler
 graph_learner_undersampler <- GraphLearner$new(dt_undersampler)
+```
 
+```{r}
 # Train the undersampler decision tree model
 graph_learner_undersampler$train(task, train_set)
+```
 
+```{r}
 # Show the state of the learner
 graph_learner_undersampler$state
+```
 
+```{r}
 # Visualize undersampler decision tree model
 rpart.plot(graph_learner_undersampler$state$model$classif.rpart$model, cex = 0.6)
+```
 
+```{r}
 # Make predictions on the test set 
 undersampler_prediction_dt <- graph_learner_undersampler$predict(task, test_set)
+```
 
+```{r}
 # Show confusion matrix
 undersampler_prediction_dt$confusion
+```
 
+```{r}
 # Print sensitivity
 undersampler_prediction_dt$score(msr("classif.sensitivity"))
 undersampler_prediction_dt$score(msr("classif.ce"))
 undersampler_prediction_dt$score(msr("classif.fbeta"))
+```
 
+```{r}
 # DECISION TREE MODEL; OVERSAMPLER 
 # Create an oversampler 
 oversampler = po("classbalancing", ratio = 5, reference = "minor", adjust = "minor", shuffle = F, id = "oversampler")
@@ -167,10 +188,14 @@ dt_oversampler <- oversampler %>>%
 
 # Create a graph learner for oversampler
 graph_learner_oversampler <- GraphLearner$new(dt_oversampler)
+```
 
+```{r}
 # Train the oversampler decision tree model
 graph_learner_oversampler$train(task, train_set)
+```
 
+```{r}
 # Show the state of the learner
 graph_learner_oversampler$state
 ```
@@ -183,27 +208,110 @@ rpart.plot(graph_learner_oversampler$state$model$classif.rpart$model, cex = 0.6)
 ```{r}
 # Make predictions on the test set 
 oversampler_prediction_dt <- graph_learner_oversampler$predict(task, test_set)
+```
 
+```{r}
 oversampler_prediction_dt$confusion
+```
+
+```{r}
 oversampler_prediction_dt$score(msr("classif.sensitivity"))
 oversampler_prediction_dt$score(msr("classif.ce"))
 oversampler_prediction_dt$score(msr("classif.fbeta"))
 ```
+
+```{r}
+# DECISION TREE MODEL PRECEEDED BY RANDOM FORESTS AND K-NEAREST NEIGHBOURS ON UNDERSAMPLED DATA
+# Create an undersampler 
+undersampler_model2 <- po("classbalancing", ratio = 1/5, reference = "major", adjust = "major", shuffle = F, id = "undersampler_model2")
+
+# Create ML graph for undersampler_model2
+dt_undersampler_model2 <- undersampler_model2 %>>% 
+  gunion(list(
+    po("learner_cv", lrn("classif.ranger", num.trees = 1000)),
+    po("learner_cv", lrn("classif.kknn", k = 5)))) %>>%
+  po("featureunion") %>>%
+  lrn("classif.rpart")
+```
+
+```{r}
+# Visualize the pipeline
+dt_undersampler_model2$plot()
+```
+
+```{r}
+# Create a graph learner for undersampler_model2
+graph_learner_undersampler_model2 <- GraphLearner$new(dt_undersampler_model2)
+```
+
+```{r}
+# Train the undersampler_model2 decision tree model
+graph_learner_undersampler_model2$train(task, train_set)
+```
+
+```{r}
+# Show the state of the learner
+graph_learner_undersampler_model2$state
+```
+
+```{r}
+# Visualize undersampler_model2 decision tree model
+rpart.plot(graph_learner_undersampler_model2$state$model$classif.rpart$model)
+```
+
+```{r}
+# Make predictions on the test set 
+undersampler_model2_prediction_dt <- graph_learner_undersampler_model2$predict(task, test_set)
+```
+
+```{r}
+# Show confusion matrix
+undersampler_model2_prediction_dt$confusion
+```
+
+```{r}
+# Print sensitivity
+undersampler_model2_prediction_dt$score(msr("classif.sensitivity"))
+undersampler_model2_prediction_dt$score(msr("classif.acc"))
+undersampler_model2_prediction_dt$score(msr("classif.fbeta"))
+```
+
 
 ```{r warning = F, message = F}
 # Benchmarking 
 dt_benchmark <- benchmark_grid(tasks = task,
                                learners = c(graph_learner_doing_nothing_sampler,
                                             graph_learner_undersampler, 
-                                            graph_learner_oversampler), 
-                               resamplings = rsmp("cv", folds = 2))
+                                            graph_learner_oversampler, 
+                                            dt_undersampler_model2 ), 
+                               resamplings = rsmp("cv", folds = 3))
 
 dt_bm_results <- benchmark(dt_benchmark)
+```
 
+```{r}
+# Make a table of the model validation metrics
 as.data.table(
   dt_bm_results$aggregate(
     c(msr("classif.ce"),
       msr("classif.sensitivity"),
       msr("classif.fbeta"))))[, c(
-        "learner_id", "classif.ce", "classif.sensitivity", "classif.fbeta")]
+        "learner_id", "classif.ce", "classif.sensitivity", "classif.fbeta")] %>% 
+  kable()
 ```
+
+```{r}
+# Benchmark visualizations 
+classification_error_plot <- autoplot(dt_bm_results, measure = msr("classif.ce")) +
+  xlab("Class balancing method prior to decision tree implementation") +
+  ylab("Classification Error Rate") +
+  theme_classic()
+
+sensitivity_plot <- autoplot(dt_bm_results, measure = msr("classif.sensitivity")) +
+  xlab("Class balancing method prior to decision tree implementation") +
+  ylab("Sensitivity") +
+  theme_classic()
+
+plot_grid(classification_error_plot, sensitivity_plot)
+```
+
