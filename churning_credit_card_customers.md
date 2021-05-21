@@ -9,9 +9,11 @@ output:
 
 
 
-# Background 
+# Background
 
-Customer churn is the loss/turnover of a client. For this analysis, the goal is to predict/classify customers who will churn. We will begin by importing the necessary packages and performing some exploratory data analysis. 
+Customer churn is the loss/turnover of a client. For this analysis, the goal is to predict/classify customers who will churn. We will begin with exploratory data analysis to get a comprehensive understanding of the data, and then perform pre-processing if necessary, and delve into model development and evaluation. 
+
+I will be performing the analysis in R, and additionally leverage some of its external packages for analysis and visualizations. 
 
 
 ```r
@@ -34,6 +36,135 @@ packageCheck <- lapply(required_packages, FUN = function(x) {
 
 
 
+Let us take a peek at the data 
+
+
+```r
+# Plot the profile of the data
+DataExplorer::plot_str(bank_churn)
+```
+
+
+
+```r
+# Print the first 3 rows of the data 
+bank_churn[1:3, ] 
+```
+
+```
+##    CLIENTNUM    Attrition_Flag Customer_Age Gender Dependent_count
+## 1: 768805383 Existing Customer           45      M               3
+## 2: 818770008 Existing Customer           49      F               5
+## 3: 713982108 Existing Customer           51      M               3
+##    Education_Level Marital_Status Income_Category Card_Category Months_on_book
+## 1:     High School        Married     $60K - $80K          Blue             39
+## 2:        Graduate         Single  Less than $40K          Blue             44
+## 3:        Graduate        Married    $80K - $120K          Blue             36
+##    Total_Relationship_Count Months_Inactive_12_mon Contacts_Count_12_mon
+## 1:                        5                      1                     3
+## 2:                        6                      1                     2
+## 3:                        4                      1                     0
+##    Credit_Limit Total_Revolving_Bal Avg_Open_To_Buy Total_Amt_Chng_Q4_Q1
+## 1:        12691                 777           11914                1.335
+## 2:         8256                 864            7392                1.541
+## 3:         3418                   0            3418                2.594
+##    Total_Trans_Amt Total_Trans_Ct Total_Ct_Chng_Q4_Q1 Avg_Utilization_Ratio
+## 1:            1144             42               1.625                 0.061
+## 2:            1291             33               3.714                 0.105
+## 3:            1887             20               2.333                 0.000
+```
+
+Below is a table informing what the different features mean. 
+
+
+|Variable Name            |Variable Meaning                                        |
+|:------------------------|:-------------------------------------------------------|
+|CLIENTNUM                |Client number                                           |
+|Attrition_Flag           |Whether or not the customer churned                     |
+|Customer_Age             |Age of customer                                         |
+|Gender                   |Sex of customer                                         |
+|Dependent_count          |Number of dependents                                    |
+|Education_Level          |Educational qualification of the account holder         |
+|Marital_Status           |Married, Single, Divorced or Unknown                    |
+|Income_Category          |Annual income category of the account holder            |
+|Card_Category            |Type of card                                            |
+|Months_on_book           |Period of relationship with the bank                    |
+|Total_Relationship_Count |Total number of products held by the customer           |
+|Months_Inactive_12_mon   |Number of months inactive in the last 12 months         |
+|Contacts_Count_12_mon    |No of contacts in the last 12 months                    |
+|Credit_Limit             |Credit limit on the credit card                         |
+|Total_Revolving_Bal      |Total revolving balance on the credit card              |
+|Avg_Open_To_Buy          |Open to buy credit line (Average of the last 12 months) |
+|Total_Amt_Chng_Q4_Q1     |Change in transaction amount (Q4/Q1)                    |
+|Total_Trans_Amt          |Total transaction amount in the last 12 months          |
+|Total_Trans_Ct           |Total transaction count in the last 12 months           |
+|Total_Ct_Chng_Q4_Q1      |Change in transaction count (Q4/Q1)                     |
+|Avg_Utilization_Ratio    |Average card utilization ratio                          |
+
+We have some bit of features here and our goal is to predict whether or not a customer will churn, as such our target feature is the Attrition_Flag. The Attrition Flag is a categorical feature that informs whether or not the customer churned, so let us get information on this feature, and make a visual representation on the proportions.
+
+
+```r
+# Create a table indicating churn proportions
+churn_proportion <- table(bank_churn$Attrition_Flag) %>% data.table() %>% setnames(new = c("Customer Group", "Count"))
+churn_proportion$`Percentage` <- round((churn_proportion$Count/sum(churn_proportion$Count))*100, 2)
+churn_proportion %>% kable()
+```
+
+
+
+|Customer Group    | Count| Percentage|
+|:-----------------|-----:|----------:|
+|Attrited Customer |  1627|      16.07|
+|Existing Customer |  8500|      83.93|
+
+```r
+# Make pie chart of churn proportions 
+pie(churn_proportion$Count, labels = paste(churn_proportion$`Customer Group`, paste(churn_proportion$Percentage, sep = "", "%"), sep = ", "), col = c("red", "burlywood"), main = "Percantage of credit card customers who have churned.\n Total number of credit card customers: 10127")
+```
+
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-6-1.png)<!-- -->
+
+As illustrated in the pie chart, we have quite the imbalanced target feature with Attrited customers being 16.07% of the data, and the other 83.93% representing Existing customers. This gives something to think about through analysis and model development. 
+
+Our goal, as mentioned earlier, is to develop a model that can effectively predict whether or not a customer will churn. That said, a model that better predicts the churning of a customer will serve better than a model the predicts the customer will stay. This piece of information will be key when evaluating model performance. 
+
+As a case scenario, say we have a model that predicts every customer will remain; if we test this model on our complete data set, and evaluate simply using accuracy, then our model will be right 83.93% of the time...simply misleading benchmark for evaluations give our model may very well be useless in detecting/predicting customer who will churn. In essence, we must keep our analytics goal (i.e., predicting customers who churn) in mind. 
+
+Let us continue with our data exploration and pre-processing. 
+
+
+```r
+# Get the class of each variable
+data.table(`Variable Name` = variable_names, `Variable Class` = lapply(bank_churn, class)) %>% t()
+```
+
+```
+##                [,1]        [,2]             [,3]           [,4]       
+## Variable Name  "CLIENTNUM" "Attrition_Flag" "Customer_Age" "Gender"   
+## Variable Class "integer"   "character"      "integer"      "character"
+##                [,5]              [,6]              [,7]            
+## Variable Name  "Dependent_count" "Education_Level" "Marital_Status"
+## Variable Class "integer"         "character"       "character"     
+##                [,8]              [,9]            [,10]           
+## Variable Name  "Income_Category" "Card_Category" "Months_on_book"
+## Variable Class "character"       "character"     "integer"       
+##                [,11]                      [,12]                   
+## Variable Name  "Total_Relationship_Count" "Months_Inactive_12_mon"
+## Variable Class "integer"                  "integer"               
+##                [,13]                   [,14]          [,15]                
+## Variable Name  "Contacts_Count_12_mon" "Credit_Limit" "Total_Revolving_Bal"
+## Variable Class "integer"               "numeric"      "integer"            
+##                [,16]             [,17]                  [,18]            
+## Variable Name  "Avg_Open_To_Buy" "Total_Amt_Chng_Q4_Q1" "Total_Trans_Amt"
+## Variable Class "numeric"         "numeric"              "integer"        
+##                [,19]            [,20]                 [,21]                  
+## Variable Name  "Total_Trans_Ct" "Total_Ct_Chng_Q4_Q1" "Avg_Utilization_Ratio"
+## Variable Class "integer"        "numeric"             "numeric"
+```
+
+We have to convert character variables to factors. We also have to convert some variables that are declared as integers to numeric variables i.e., Customer_Age (I think of age as a continuum), Total_Revolving_Bal, and Total_Trans_Amt
+
 
 ```r
 # Select the character variables to be converted factors
@@ -47,75 +178,484 @@ numeric_variables <- c("Customer_Age", "Total_Revolving_Bal", "Total_Trans_Amt")
 
 # Convert some integers to numeric
 bank_churn[, (numeric_variables) := lapply(.SD, as.numeric), .SDcols = numeric_variables]
+```
 
+
+```r
 # Verify that classes have been appropriately set 
-lapply(bank_churn, class)
+lapply(bank_churn, class) %>% t()
 ```
 
 ```
-## $CLIENTNUM
-## [1] "integer"
-## 
-## $Attrition_Flag
-## [1] "factor"
-## 
-## $Customer_Age
-## [1] "numeric"
-## 
-## $Gender
-## [1] "factor"
-## 
-## $Dependent_count
-## [1] "integer"
-## 
-## $Education_Level
-## [1] "factor"
-## 
-## $Marital_Status
-## [1] "factor"
-## 
-## $Income_Category
-## [1] "factor"
-## 
-## $Card_Category
-## [1] "factor"
-## 
-## $Months_on_book
-## [1] "integer"
-## 
-## $Total_Relationship_Count
-## [1] "integer"
-## 
-## $Months_Inactive_12_mon
-## [1] "integer"
-## 
-## $Contacts_Count_12_mon
-## [1] "integer"
-## 
-## $Credit_Limit
-## [1] "numeric"
-## 
-## $Total_Revolving_Bal
-## [1] "numeric"
-## 
-## $Avg_Open_To_Buy
-## [1] "numeric"
-## 
-## $Total_Amt_Chng_Q4_Q1
-## [1] "numeric"
-## 
-## $Total_Trans_Amt
-## [1] "numeric"
-## 
-## $Total_Trans_Ct
-## [1] "integer"
-## 
-## $Total_Ct_Chng_Q4_Q1
-## [1] "numeric"
-## 
-## $Avg_Utilization_Ratio
-## [1] "numeric"
+##      CLIENTNUM Attrition_Flag Customer_Age Gender   Dependent_count
+## [1,] "integer" "factor"       "numeric"    "factor" "integer"      
+##      Education_Level Marital_Status Income_Category Card_Category
+## [1,] "factor"        "factor"       "factor"        "factor"     
+##      Months_on_book Total_Relationship_Count Months_Inactive_12_mon
+## [1,] "integer"      "integer"                "integer"             
+##      Contacts_Count_12_mon Credit_Limit Total_Revolving_Bal Avg_Open_To_Buy
+## [1,] "integer"             "numeric"    "numeric"           "numeric"      
+##      Total_Amt_Chng_Q4_Q1 Total_Trans_Amt Total_Trans_Ct Total_Ct_Chng_Q4_Q1
+## [1,] "numeric"            "numeric"       "integer"      "numeric"          
+##      Avg_Utilization_Ratio
+## [1,] "numeric"
 ```
+
+Thus far, the only input feature I see that is not necessary to be included in our model is the "CLIENTNUM", The CLIENTNUM is just an identifier. I won't remove it just yet though, in accordance with the theme of EDA I'll make a plot to see the relationship between the client ID and Attrition Flag. We have no time variable to evaluate the churning through time. So, my maybe flawed logic is that the recent customers have higher client numbers than earlier customers...you know, customer 1, customer 2, ...., customer *n*, etc. 
+
+
+```r
+ggplot(data = bank_churn) +
+  geom_point(aes(x = CLIENTNUM, y = Attrition_Flag, color = Attrition_Flag)) +
+  xlab("Client Number") +
+  ylab("Customer Group") +
+  theme_classic()
+```
+
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-10-1.png)<!-- -->
+
+Damn, no cigar! But yes, visually, we confirm that the Client Number has no value in informing whether or not a client will churn. 
+
+Let us explore our numeric input features 
+
+
+```r
+# Check correlation among variables 
+correlation_data <- bank_churn[, !c("CLIENTNUM")] %>% 
+  keep(is.numeric) %>% 
+  as.matrix() %>%
+  rcorr() 
+```
+
+
+```r
+# Make correlation plot 
+corrplot::corrplot(correlation_data$r, type = "lower", p.mat = correlation_data$P, sig.level = 0.05, order = "alphabet", tl.cex = 0.7)
+```
+
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-12-1.png)<!-- -->
+
+From above, we see that not too many quantitative variables are highly and significantly correlated. The correlated variables are however understandably related and include: 
+
+- Customer Age and Months on book (R^2^ = 0.789, p-value < 0.05)
+- Open to buy credit line and Credit limit (R^2^ = 0.996, p-value < 0.05)
+- Average utilization ratio and Total revolving balance (R^2^ = 0.624, p-value < 0.05)
+- Total transaction count and Total transaction amount (R^2^ = 0.0.807, p-value < 0.05)
+
+The above information should be noted when making a model as it violates some assumptions that underlie some methods. 
+
+How about the distribution of the numerical features as they relate to Attrition Flag? 
+
+
+```r
+# Density plot illustration distribution of total transaction amount
+trans_amnt_density <- ggplot(data = bank_churn, aes(x = Total_Trans_Amt, color = Attrition_Flag, fill = Attrition_Flag)) + 
+  geom_density(alpha = 0.5) + 
+  theme_classic() +
+  theme(legend.position = "none")
+
+# Box plot illustration distribution of total transaction count 
+trans_amnt_boxplot <- ggplot(data = bank_churn, aes(x = Total_Trans_Amt, y = Attrition_Flag, fill = Attrition_Flag)) +
+  geom_boxplot() +
+  theme_classic() +
+  theme(legend.position = "none")
+
+plot_grid(trans_amnt_density, trans_amnt_boxplot, ncol = 1)
+```
+
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-13-1.png)<!-- -->
+
+Based on the above plot, we see that clients who churn mostly have lower transaction amounts that those who do not churn. There are outliers in both categories, and these outliers have increased transaction amounts. Both groups have a right skew, and as shown below, taking the log10 of these groups somewhat normalizes their distribution. Another piece of information may be useful depending on the model we build. 
+
+
+```r
+# Density plot illustration distribution of log total transaction amount
+log_trans_amnt_density <- ggplot(data = bank_churn, aes(x = log10(Total_Trans_Amt), color = Attrition_Flag, fill = Attrition_Flag)) + 
+  geom_density(alpha = 0.5) + 
+  theme_classic() +
+  theme(legend.position = "none")
+
+# Box plot illustration distribution of log total transaction amount
+log_trans_amnt_boxplot <- ggplot(data = bank_churn, aes(x = log10(Total_Trans_Amt), y = Attrition_Flag, fill = Attrition_Flag)) +
+  geom_boxplot() +
+  theme_classic() +
+  theme(legend.position = "none")
+
+plot_grid(log_trans_amnt_density, log_trans_amnt_boxplot, ncol = 1)
+```
+
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-14-1.png)<!-- -->
+
+Below are the plots/distribution of the other numerical features. As expected, the total transaction count follows a similar distribution to the total transaction amount given the relationship between these variables.
+
+
+```r
+# Density plot illustration distribution of total transaction count 
+ggplot(bank_churn, aes(x = Total_Trans_Ct, color = Attrition_Flag, fill = Attrition_Flag)) + 
+  geom_density(alpha = 0.5) + 
+  theme_classic()
+```
+
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-15-1.png)<!-- -->
+
+```r
+# Density plot illustration distribution of Change in transaction count (Q4/Q1)
+ggplot(bank_churn, aes(x = Total_Ct_Chng_Q4_Q1, color = Attrition_Flag, fill = Attrition_Flag)) + 
+  geom_density(alpha = 0.5) + 
+  theme_classic()
+```
+
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-15-2.png)<!-- -->
+
+```r
+# Density plot illustration distribution of Change in transaction amount (Q4/Q1) 
+ggplot(bank_churn, aes(x = Total_Amt_Chng_Q4_Q1, color = Attrition_Flag, fill = Attrition_Flag)) + 
+  geom_density(alpha = 0.5) + 
+  theme_classic()
+```
+
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-15-3.png)<!-- -->
+
+```r
+# Density plot illustration distribution of Total revolving balance on the credit card
+ggplot(bank_churn, aes(x = Total_Revolving_Bal, color = Attrition_Flag, fill = Attrition_Flag)) + 
+  geom_density(alpha = 0.5) + 
+  theme_classic()
+```
+
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-15-4.png)<!-- -->
+
+Let us explore the categorical features. 
+
+```r
+DataExplorer::plot_bar(bank_churn)
+```
+
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-16-1.png)<!-- -->
+
+The bar plot also informs that with the exception of Male:Female and Married:Single, the proportions of categories within the data are not evenly distributed. Let us get the actual metrics on the categorical features. 
+
+
+```r
+# Metrics on the categorical features
+Hmisc::describe(bank_churn[, c("Gender", "Education_Level", "Marital_Status", "Income_Category", "Card_Category")])
+```
+
+```
+## bank_churn[, c("Gender", "Education_Level", "Marital_Status", "Income_Category", "Card_Category")] 
+## 
+##  5  Variables      10127  Observations
+## --------------------------------------------------------------------------------
+## Gender 
+##        n  missing distinct 
+##    10127        0        2 
+##                       
+## Value          F     M
+## Frequency   5358  4769
+## Proportion 0.529 0.471
+## --------------------------------------------------------------------------------
+## Education_Level 
+##        n  missing distinct 
+##    10127        0        7 
+## 
+## lowest : College       Doctorate     Graduate      High School   Post-Graduate
+## highest: Graduate      High School   Post-Graduate Uneducated    Unknown      
+##                                                                   
+## Value            College     Doctorate      Graduate   High School
+## Frequency           1013           451          3128          2013
+## Proportion         0.100         0.045         0.309         0.199
+##                                                     
+## Value      Post-Graduate    Uneducated       Unknown
+## Frequency            516          1487          1519
+## Proportion         0.051         0.147         0.150
+## --------------------------------------------------------------------------------
+## Marital_Status 
+##        n  missing distinct 
+##    10127        0        4 
+##                                               
+## Value      Divorced  Married   Single  Unknown
+## Frequency       748     4687     3943      749
+## Proportion    0.074    0.463    0.389    0.074
+## --------------------------------------------------------------------------------
+## Income_Category 
+##        n  missing distinct 
+##    10127        0        6 
+## 
+## lowest : $120K +        $40K - $60K    $60K - $80K    $80K - $120K   Less than $40K
+## highest: $40K - $60K    $60K - $80K    $80K - $120K   Less than $40K Unknown       
+##                                                                       
+## Value             $120K +    $40K - $60K    $60K - $80K   $80K - $120K
+## Frequency             727           1790           1402           1535
+## Proportion          0.072          0.177          0.138          0.152
+##                                         
+## Value      Less than $40K        Unknown
+## Frequency            3561           1112
+## Proportion          0.352          0.110
+## --------------------------------------------------------------------------------
+## Card_Category 
+##        n  missing distinct 
+##    10127        0        4 
+##                                               
+## Value          Blue     Gold Platinum   Silver
+## Frequency      9436      116       20      555
+## Proportion    0.932    0.011    0.002    0.055
+## --------------------------------------------------------------------------------
+```
+
+The most striking bit of information in here is that 93.2% of the individuals on which the information was collected have Blue cards. It will be surprising, nay, highly improbable that the card category will be an important feature in the data given the proportion of people who churned. 
+
+Now we explore the relationship between categorical input features and target feature 
+
+As shown below, our data contains more females than males, although of relatively similar proportions; also, of our total clients, 9.18% were females who churned while 6.88% were males who churned. We will observe the other categorical features in similar manner, searching for categories with high attrition observations. It should however be noted that this method of exploration does not account for interaction among features. 
+
+
+```r
+table(bank_churn$Gender, bank_churn$Attrition_Flag)
+```
+
+```
+##    
+##     Attrited Customer Existing Customer
+##   F               930              4428
+##   M               697              4072
+```
+
+
+```r
+gender_attrition <- bank_churn[, by = .(Gender, Attrition_Flag), .N] %>% 
+  .[order(Gender)] %>% setnames(old = "N", new = "Count")
+
+gender_attrition_stack <- ggplot(gender_attrition, aes(fill = Attrition_Flag, y = Count, x = Gender)) +
+  geom_bar(position = "stack", stat = "identity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+gender_attrition_fill <- ggplot(gender_attrition, aes(fill = Attrition_Flag, y = Count, x = Gender)) +
+  geom_bar(position = "fill", stat = "identity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+gender_attrition_legend <- get_legend(gender_attrition_stack + theme(legend.position = "right"))
+```
+
+
+```r
+plot_grid(gender_attrition_stack, gender_attrition_fill, gender_attrition_legend, ncol = 3)
+```
+
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-20-1.png)<!-- -->
+
+
+
+
+
+
+```r
+table(bank_churn$Education_Level, bank_churn$Attrition_Flag)
+```
+
+```
+##                
+##                 Attrited Customer Existing Customer
+##   College                     154               859
+##   Doctorate                    95               356
+##   Graduate                    487              2641
+##   High School                 306              1707
+##   Post-Graduate                92               424
+##   Uneducated                  237              1250
+##   Unknown                     256              1263
+```
+
+
+```r
+Education_Level_attrition <- bank_churn[, by = .(Education_Level, Attrition_Flag), .N] %>% 
+  .[order(Education_Level)] %>% setnames(old = "N", new = "Count")
+
+Education_Level_attrition_stack <- ggplot(Education_Level_attrition, aes(fill = Attrition_Flag, y = Count, x = Education_Level)) +
+  geom_bar(position = "stack", stat = "identity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+Education_Level_attrition_fill <- ggplot(Education_Level_attrition, aes(fill = Attrition_Flag, y = Count, x = Education_Level)) +
+  geom_bar(position = "fill", stat = "identity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+Education_Level_attrition_legend <- get_legend(Education_Level_attrition_stack + theme(legend.position = "right"))
+```
+
+
+```r
+plot_grid(Education_Level_attrition_stack, Education_Level_attrition_fill, Education_Level_attrition_legend, ncol = 3)
+```
+
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-23-1.png)<!-- -->
+
+
+
+
+```r
+table(bank_churn$Marital_Status, bank_churn$Attrition_Flag)
+```
+
+```
+##           
+##            Attrited Customer Existing Customer
+##   Divorced               121               627
+##   Married                709              3978
+##   Single                 668              3275
+##   Unknown                129               620
+```
+
+
+```r
+Marital_Status_attrition <- bank_churn[, by = .(Marital_Status, Attrition_Flag), .N] %>% 
+  .[order(Marital_Status)] %>% setnames(old = "N", new = "Count")
+
+Marital_Status_attrition_stack <- ggplot(Marital_Status_attrition, aes(fill = Attrition_Flag, y = Count, x = Marital_Status)) +
+  geom_bar(position = "stack", stat = "identity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+Marital_Status_attrition_fill <- ggplot(Marital_Status_attrition, aes(fill = Attrition_Flag, y = Count, x = Marital_Status)) +
+  geom_bar(position = "fill", stat = "identity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+Marital_Status_attrition_legend <- get_legend(Marital_Status_attrition_stack + theme(legend.position = "right"))
+```
+
+
+```r
+plot_grid(Marital_Status_attrition_stack, Marital_Status_attrition_fill, Marital_Status_attrition_legend, ncol = 3)
+```
+
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-26-1.png)<!-- -->
+
+
+
+```r
+table(bank_churn$Income_Category, bank_churn$Attrition_Flag)
+```
+
+```
+##                 
+##                  Attrited Customer Existing Customer
+##   $120K +                      126               601
+##   $40K - $60K                  271              1519
+##   $60K - $80K                  189              1213
+##   $80K - $120K                 242              1293
+##   Less than $40K               612              2949
+##   Unknown                      187               925
+```
+
+
+```r
+Income_Category_attrition <- bank_churn[, by = .(Income_Category, Attrition_Flag), .N] %>% 
+  .[order(Income_Category)] %>% setnames(old = "N", new = "Count")
+
+Income_Category_attrition_stack <- ggplot(Income_Category_attrition, aes(fill = Attrition_Flag, y = Count, x = Income_Category)) +
+  geom_bar(position = "stack", stat = "identity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+Income_Category_attrition_fill <- ggplot(Income_Category_attrition, aes(fill = Attrition_Flag, y = Count, x = Income_Category)) +
+  geom_bar(position = "fill", stat = "identity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+Income_Category_attrition_legend <- get_legend(Income_Category_attrition_stack + theme(legend.position = "right"))
+```
+
+
+```r
+plot_grid(Income_Category_attrition_stack, Income_Category_attrition_fill, Income_Category_attrition_legend, ncol = 3)
+```
+
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-29-1.png)<!-- -->
+
+
+
+
+
+```r
+table(bank_churn$Card_Category, bank_churn$Attrition_Flag)
+```
+
+```
+##           
+##            Attrited Customer Existing Customer
+##   Blue                  1519              7917
+##   Gold                    21                95
+##   Platinum                 5                15
+##   Silver                  82               473
+```
+
+
+```r
+Card_Category_attrition <- bank_churn[, by = .(Card_Category, Attrition_Flag), .N] %>% 
+  .[order(Card_Category)] %>% setnames(old = "N", new = "Count")
+
+Card_Category_attrition_stack <- ggplot(Card_Category_attrition, aes(fill = Attrition_Flag, y = Count, x = Card_Category)) +
+  geom_bar(position = "stack", stat = "identity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+Card_Category_attrition_fill <- ggplot(Card_Category_attrition, aes(fill = Attrition_Flag, y = Count, x = Card_Category)) +
+  geom_bar(position = "fill", stat = "identity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+Card_Category_attrition_legend <- get_legend(Card_Category_attrition_stack + theme(legend.position = "right"))
+```
+
+
+```r
+plot_grid(Card_Category_attrition_stack, Card_Category_attrition_fill, Card_Category_attrition_legend, ncol = 3)
+```
+
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-32-1.png)<!-- -->
+
+
+
+
+
+```r
+categorical_attrition <- bank_churn[, by = .(Gender, Education_Level, Marital_Status, Income_Category, Card_Category, Attrition_Flag), .N] %>% setnames(old = "N", new = "Count") %>% .[order(Attrition_Flag, -Count)]
+```
+
+
+```r
+attrited_customer <- categorical_attrition[Attrition_Flag == "Attrited Customer"] %>% 
+  .[, proportion_of_total := (Count/sum(Count))*100]
+```
+
+
+```r
+# Print out the top 10 observations that account for attrited customers 
+attrited_customer[1:10, !c("Attrition_Flag")] %>% kable()
+```
+
+
+
+|Gender |Education_Level |Marital_Status |Income_Category |Card_Category | Count| proportion_of_total|
+|:------|:---------------|:--------------|:---------------|:-------------|-----:|-------------------:|
+|F      |Graduate        |Single         |Less than $40K  |Blue          |    80|            4.917025|
+|F      |Graduate        |Married        |Less than $40K  |Blue          |    79|            4.855562|
+|F      |Unknown         |Married        |Less than $40K  |Blue          |    44|            2.704364|
+|F      |High School     |Married        |Less than $40K  |Blue          |    39|            2.397050|
+|F      |Unknown         |Single         |Less than $40K  |Blue          |    37|            2.274124|
+|F      |High School     |Single         |Less than $40K  |Blue          |    35|            2.151199|
+|F      |Uneducated      |Single         |Less than $40K  |Blue          |    34|            2.089736|
+|M      |Graduate        |Married        |$80K - $120K    |Blue          |    27|            1.659496|
+|F      |Uneducated      |Married        |Less than $40K  |Blue          |    25|            1.536570|
+|F      |Graduate        |Married        |Unknown         |Blue          |    25|            1.536570|
+
+The observations shown above illustrate the characteristics of 26% of our churned customers. We can further evaluate the table containing 100% of our churned customers to evaluate which categorical features (after encoding) account for most of the variation among the churned customers. One thing is for certain though, the Card Category doesn't contain most of the variation within the data. 
+
+# Modelling 
+
+Armed with some information from exploratory analysis, let us proceed to model development. For this analysis, I'll like to use a decision tree because of its simplicity to comprehend when understanding the relationship between input features and the target variable. I'll also focus on improving the performance of this decision tree albeit by utilizing ensemble methods (i.e., following random forests and k-nearest neighbours). 
 
 
 ```r
@@ -505,40 +1045,36 @@ graph_learner_doing_nothing_sampler$state
 ##       * denotes terminal node
 ## 
 ##  1) root 8101 1305 Existing Customer (0.16109122 0.83890878)  
-##    2) Total_Trans_Ct< 54.5 2752 1053 Existing Customer (0.38263081 0.61736919)  
-##      4) Total_Revolving_Bal< 613.5 910  235 Attrited Customer (0.74175824 0.25824176)  
-##        8) Total_Ct_Chng_Q4_Q1< 0.729 736  132 Attrited Customer (0.82065217 0.17934783)  
-##         16) Total_Trans_Amt>=1805 495   42 Attrited Customer (0.91515152 0.08484848) *
-##         17) Total_Trans_Amt< 1805 241   90 Attrited Customer (0.62655602 0.37344398)  
-##           34) Total_Relationship_Count< 3.5 136   24 Attrited Customer (0.82352941 0.17647059) *
-##           35) Total_Relationship_Count>=3.5 105   39 Existing Customer (0.37142857 0.62857143)  
-##             70) Total_Trans_Amt< 995 15    0 Attrited Customer (1.00000000 0.00000000) *
-##             71) Total_Trans_Amt>=995 90   24 Existing Customer (0.26666667 0.73333333) *
-##        9) Total_Ct_Chng_Q4_Q1>=0.729 174   71 Existing Customer (0.40804598 0.59195402)  
-##         18) Total_Relationship_Count< 2.5 31    2 Attrited Customer (0.93548387 0.06451613) *
-##         19) Total_Relationship_Count>=2.5 143   42 Existing Customer (0.29370629 0.70629371) *
-##      5) Total_Revolving_Bal>=613.5 1842  378 Existing Customer (0.20521173 0.79478827)  
-##       10) Total_Relationship_Count< 2.5 173   40 Attrited Customer (0.76878613 0.23121387) *
-##       11) Total_Relationship_Count>=2.5 1669  245 Existing Customer (0.14679449 0.85320551)  
-##         22) Total_Trans_Amt>=2102 403  157 Existing Customer (0.38957816 0.61042184)  
-##           44) Total_Ct_Chng_Q4_Q1< 0.6315 190   72 Attrited Customer (0.62105263 0.37894737)  
-##             88) Customer_Age>=37.5 136   29 Attrited Customer (0.78676471 0.21323529) *
-##             89) Customer_Age< 37.5 54   11 Existing Customer (0.20370370 0.79629630) *
-##           45) Total_Ct_Chng_Q4_Q1>=0.6315 213   39 Existing Customer (0.18309859 0.81690141) *
-##         23) Total_Trans_Amt< 2102 1266   88 Existing Customer (0.06951027 0.93048973)  
-##           46) Total_Trans_Amt< 924.5 18    1 Attrited Customer (0.94444444 0.05555556) *
-##           47) Total_Trans_Amt>=924.5 1248   71 Existing Customer (0.05689103 0.94310897) *
-##    3) Total_Trans_Ct>=54.5 5349  252 Existing Customer (0.04711161 0.95288839)  
-##      6) Total_Trans_Amt>=5417 1230  188 Existing Customer (0.15284553 0.84715447)  
-##       12) Total_Trans_Ct< 79.5 210   53 Attrited Customer (0.74761905 0.25238095) *
-##       13) Total_Trans_Ct>=79.5 1020   31 Existing Customer (0.03039216 0.96960784) *
-##      7) Total_Trans_Amt< 5417 4119   64 Existing Customer (0.01553775 0.98446225) *
+##    2) Total_Trans_Ct< 54.5 2757 1045 Existing Customer (0.37903518 0.62096482)  
+##      4) Total_Revolving_Bal< 642.5 920  242 Attrited Customer (0.73695652 0.26304348)  
+##        8) Total_Ct_Chng_Q4_Q1< 0.6615 687  111 Attrited Customer (0.83842795 0.16157205) *
+##        9) Total_Ct_Chng_Q4_Q1>=0.6615 233  102 Existing Customer (0.43776824 0.56223176)  
+##         18) Total_Relationship_Count< 2.5 41    2 Attrited Customer (0.95121951 0.04878049) *
+##         19) Total_Relationship_Count>=2.5 192   63 Existing Customer (0.32812500 0.67187500)  
+##           38) Total_Trans_Amt>=1967 86   37 Attrited Customer (0.56976744 0.43023256)  
+##             76) Total_Trans_Amt< 2978 67   20 Attrited Customer (0.70149254 0.29850746) *
+##             77) Total_Trans_Amt>=2978 19    2 Existing Customer (0.10526316 0.89473684) *
+##           39) Total_Trans_Amt< 1967 106   14 Existing Customer (0.13207547 0.86792453) *
+##      5) Total_Revolving_Bal>=642.5 1837  367 Existing Customer (0.19978225 0.80021775)  
+##       10) Total_Relationship_Count< 2.5 168   39 Attrited Customer (0.76785714 0.23214286) *
+##       11) Total_Relationship_Count>=2.5 1669  238 Existing Customer (0.14260036 0.85739964)  
+##         22) Total_Trans_Amt>=2102 415  160 Existing Customer (0.38554217 0.61445783)  
+##           44) Total_Ct_Chng_Q4_Q1< 0.6315 199   76 Attrited Customer (0.61809045 0.38190955)  
+##             88) Customer_Age>=37.5 145   32 Attrited Customer (0.77931034 0.22068966) *
+##             89) Customer_Age< 37.5 54   10 Existing Customer (0.18518519 0.81481481) *
+##           45) Total_Ct_Chng_Q4_Q1>=0.6315 216   37 Existing Customer (0.17129630 0.82870370) *
+##         23) Total_Trans_Amt< 2102 1254   78 Existing Customer (0.06220096 0.93779904) *
+##    3) Total_Trans_Ct>=54.5 5344  260 Existing Customer (0.04865269 0.95134731)  
+##      6) Total_Trans_Amt>=5423 1215  189 Existing Customer (0.15555556 0.84444444)  
+##       12) Total_Trans_Ct< 78.5 204   49 Attrited Customer (0.75980392 0.24019608) *
+##       13) Total_Trans_Ct>=78.5 1011   34 Existing Customer (0.03363007 0.96636993) *
+##      7) Total_Trans_Amt< 5423 4129   71 Existing Customer (0.01719545 0.98280455) *
 ## 
 ## $model$classif.rpart$log
 ## Empty data.table (0 rows and 3 cols): stage,class,msg
 ## 
 ## $model$classif.rpart$train_time
-## [1] 0.11
+## [1] 0.05
 ## 
 ## $model$classif.rpart$train_task
 ## <TaskClassif:BankChurn> (8101 x 20)
@@ -560,7 +1096,7 @@ graph_learner_doing_nothing_sampler$state
 ## Empty data.table (0 rows and 3 cols): stage,class,msg
 ## 
 ## $train_time
-## [1] 0.14
+## [1] 0.07
 ## 
 ## $train_task
 ## <TaskClassif:BankChurn> (10127 x 20)
@@ -583,7 +1119,7 @@ graph_learner_doing_nothing_sampler$state
 rpart.plot(graph_learner_doing_nothing_sampler$state$model$classif.rpart$model, cex = 0.6)
 ```
 
-![](churning_credit_card_customers_files/figure-html/unnamed-chunk-12-1.png)<!-- -->
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-44-1.png)<!-- -->
 
 
 ```r
@@ -600,8 +1136,8 @@ prediction_dt$confusion
 ```
 ##                    truth
 ## response            Attrited Customer Existing Customer
-##   Attrited Customer               253                60
-##   Existing Customer                69              1644
+##   Attrited Customer               249                73
+##   Existing Customer                73              1631
 ```
 
 
@@ -612,7 +1148,7 @@ prediction_dt$score(msr("classif.sensitivity"))
 
 ```
 ## classif.sensitivity 
-##           0.7857143
+##           0.7732919
 ```
 
 ```r
@@ -621,7 +1157,7 @@ prediction_dt$score(msr("classif.ce"))
 
 ```
 ## classif.ce 
-## 0.06367226
+## 0.07206318
 ```
 
 ```r
@@ -630,7 +1166,7 @@ prediction_dt$score(msr("classif.fbeta"))
 
 ```
 ## classif.fbeta 
-##     0.7968504
+##     0.7732919
 ```
 
 
@@ -730,28 +1266,28 @@ graph_learner_undersampler$state
 ##       * denotes terminal node
 ## 
 ##  1) root 2664 1305 Existing Customer (0.48986486 0.51013514)  
-##    2) Total_Trans_Ct< 59.5 1541  432 Attrited Customer (0.71966256 0.28033744)  
-##      4) Total_Revolving_Bal< 716.5 788   69 Attrited Customer (0.91243655 0.08756345) *
-##      5) Total_Revolving_Bal>=716.5 753  363 Attrited Customer (0.51792829 0.48207171)  
-##       10) Total_Relationship_Count< 2.5 147    8 Attrited Customer (0.94557823 0.05442177) *
-##       11) Total_Relationship_Count>=2.5 606  251 Existing Customer (0.41419142 0.58580858)  
-##         22) Total_Trans_Amt>=2035.5 269   97 Attrited Customer (0.63940520 0.36059480)  
-##           44) Total_Ct_Chng_Q4_Q1< 0.678 170   31 Attrited Customer (0.81764706 0.18235294) *
-##           45) Total_Ct_Chng_Q4_Q1>=0.678 99   33 Existing Customer (0.33333333 0.66666667) *
-##         23) Total_Trans_Amt< 2035.5 337   79 Existing Customer (0.23442136 0.76557864)  
-##           46) Total_Trans_Amt< 1103.5 31    4 Attrited Customer (0.87096774 0.12903226) *
-##           47) Total_Trans_Amt>=1103.5 306   52 Existing Customer (0.16993464 0.83006536) *
-##    3) Total_Trans_Ct>=59.5 1123  196 Existing Customer (0.17453250 0.82546750)  
-##      6) Total_Trans_Amt>=5258 390  177 Existing Customer (0.45384615 0.54615385)  
-##       12) Total_Trans_Ct< 80.5 161   11 Attrited Customer (0.93167702 0.06832298) *
-##       13) Total_Trans_Ct>=80.5 229   27 Existing Customer (0.11790393 0.88209607) *
-##      7) Total_Trans_Amt< 5258 733   19 Existing Customer (0.02592087 0.97407913) *
+##    2) Total_Trans_Ct< 59.5 1482  375 Attrited Customer (0.74696356 0.25303644)  
+##      4) Total_Revolving_Bal< 745 784   56 Attrited Customer (0.92857143 0.07142857) *
+##      5) Total_Revolving_Bal>=745 698  319 Attrited Customer (0.54297994 0.45702006)  
+##       10) Total_Relationship_Count< 2.5 142    6 Attrited Customer (0.95774648 0.04225352) *
+##       11) Total_Relationship_Count>=2.5 556  243 Existing Customer (0.43705036 0.56294964)  
+##         22) Total_Trans_Amt>=2028.5 272   99 Attrited Customer (0.63602941 0.36397059)  
+##           44) Total_Amt_Chng_Q4_Q1< 1.079 238   68 Attrited Customer (0.71428571 0.28571429)  
+##             88) Total_Trans_Ct< 53.5 184   31 Attrited Customer (0.83152174 0.16847826) *
+##             89) Total_Trans_Ct>=53.5 54   17 Existing Customer (0.31481481 0.68518519) *
+##           45) Total_Amt_Chng_Q4_Q1>=1.079 34    3 Existing Customer (0.08823529 0.91176471) *
+##         23) Total_Trans_Amt< 2028.5 284   70 Existing Customer (0.24647887 0.75352113) *
+##    3) Total_Trans_Ct>=59.5 1182  198 Existing Customer (0.16751269 0.83248731)  
+##      6) Total_Trans_Amt>=5371.5 382  175 Existing Customer (0.45811518 0.54188482)  
+##       12) Total_Trans_Ct< 82.5 177   21 Attrited Customer (0.88135593 0.11864407) *
+##       13) Total_Trans_Ct>=82.5 205   19 Existing Customer (0.09268293 0.90731707) *
+##      7) Total_Trans_Amt< 5371.5 800   23 Existing Customer (0.02875000 0.97125000) *
 ## 
 ## $model$classif.rpart$log
 ## Empty data.table (0 rows and 3 cols): stage,class,msg
 ## 
 ## $model$classif.rpart$train_time
-## [1] 0.02
+## [1] 0.03
 ## 
 ## $model$classif.rpart$train_task
 ## <TaskClassif:BankChurn> (2664 x 20)
@@ -773,7 +1309,7 @@ graph_learner_undersampler$state
 ## Empty data.table (0 rows and 3 cols): stage,class,msg
 ## 
 ## $train_time
-## [1] 0.05
+## [1] 0.04
 ## 
 ## $train_task
 ## <TaskClassif:BankChurn> (10127 x 20)
@@ -796,7 +1332,7 @@ graph_learner_undersampler$state
 rpart.plot(graph_learner_undersampler$state$model$classif.rpart$model, cex = 0.6)
 ```
 
-![](churning_credit_card_customers_files/figure-html/unnamed-chunk-19-1.png)<!-- -->
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-51-1.png)<!-- -->
 
 
 ```r
@@ -813,8 +1349,8 @@ undersampler_prediction_dt$confusion
 ```
 ##                    truth
 ## response            Attrited Customer Existing Customer
-##   Attrited Customer               288               186
-##   Existing Customer                34              1518
+##   Attrited Customer               283               169
+##   Existing Customer                39              1535
 ```
 
 
@@ -825,7 +1361,7 @@ undersampler_prediction_dt$score(msr("classif.sensitivity"))
 
 ```
 ## classif.sensitivity 
-##           0.8944099
+##            0.878882
 ```
 
 ```r
@@ -834,7 +1370,7 @@ undersampler_prediction_dt$score(msr("classif.ce"))
 
 ```
 ## classif.ce 
-##  0.1085884
+##  0.1026654
 ```
 
 ```r
@@ -843,7 +1379,7 @@ undersampler_prediction_dt$score(msr("classif.fbeta"))
 
 ```
 ## classif.fbeta 
-##     0.7236181
+##     0.7312661
 ```
 
 
@@ -943,28 +1479,26 @@ graph_learner_oversampler$state
 ##       * denotes terminal node
 ## 
 ##  1) root 13321 6525 Existing Customer (0.48982809 0.51017191)  
-##    2) Total_Trans_Ct< 57.5 7323 1873 Attrited Customer (0.74423051 0.25576949)  
-##      4) Total_Revolving_Bal< 613.5 3757  277 Attrited Customer (0.92627096 0.07372904) *
-##      5) Total_Revolving_Bal>=613.5 3566 1596 Attrited Customer (0.55243971 0.44756029)  
-##       10) Total_Relationship_Count< 2.5 736   41 Attrited Customer (0.94429348 0.05570652) *
-##       11) Total_Relationship_Count>=2.5 2830 1275 Existing Customer (0.45053004 0.54946996)  
-##         22) Total_Trans_Amt>=2038.5 1262  392 Attrited Customer (0.68938193 0.31061807)  
-##           44) Total_Ct_Chng_Q4_Q1< 0.7965 1043  218 Attrited Customer (0.79098754 0.20901246) *
-##           45) Total_Ct_Chng_Q4_Q1>=0.7965 219   45 Existing Customer (0.20547945 0.79452055) *
-##         23) Total_Trans_Amt< 2038.5 1568  405 Existing Customer (0.25829082 0.74170918)  
-##           46) Total_Trans_Amt< 1029.5 136   16 Attrited Customer (0.88235294 0.11764706) *
-##           47) Total_Trans_Amt>=1029.5 1432  285 Existing Customer (0.19902235 0.80097765) *
-##    3) Total_Trans_Ct>=57.5 5998 1075 Existing Customer (0.17922641 0.82077359)  
-##      6) Total_Trans_Amt>=5417 1962  920 Existing Customer (0.46890928 0.53109072)  
-##       12) Total_Trans_Ct< 82.5 920   95 Attrited Customer (0.89673913 0.10326087) *
-##       13) Total_Trans_Ct>=82.5 1042   95 Existing Customer (0.09117083 0.90882917) *
-##      7) Total_Trans_Amt< 5417 4036  155 Existing Customer (0.03840436 0.96159564) *
+##    2) Total_Trans_Ct< 60.5 7707 2107 Attrited Customer (0.72661217 0.27338783)  
+##      4) Total_Revolving_Bal< 634.5 3921  326 Attrited Customer (0.91685794 0.08314206) *
+##      5) Total_Revolving_Bal>=634.5 3786 1781 Attrited Customer (0.52958267 0.47041733)  
+##       10) Total_Relationship_Count< 2.5 762   47 Attrited Customer (0.93832021 0.06167979) *
+##       11) Total_Relationship_Count>=2.5 3024 1290 Existing Customer (0.42658730 0.57341270)  
+##         22) Total_Trans_Amt>=2019 1500  565 Attrited Customer (0.62333333 0.37666667)  
+##           44) Total_Ct_Chng_Q4_Q1< 0.6545 909  179 Attrited Customer (0.80308031 0.19691969) *
+##           45) Total_Ct_Chng_Q4_Q1>=0.6545 591  205 Existing Customer (0.34686971 0.65313029) *
+##         23) Total_Trans_Amt< 2019 1524  355 Existing Customer (0.23293963 0.76706037) *
+##    3) Total_Trans_Ct>=60.5 5614  925 Existing Customer (0.16476665 0.83523335)  
+##      6) Total_Trans_Amt>=5240 1934  850 Existing Customer (0.43950362 0.56049638)  
+##       12) Total_Trans_Ct< 81.5 841  106 Attrited Customer (0.87395957 0.12604043) *
+##       13) Total_Trans_Ct>=81.5 1093  115 Existing Customer (0.10521500 0.89478500) *
+##      7) Total_Trans_Amt< 5240 3680   75 Existing Customer (0.02038043 0.97961957) *
 ## 
 ## $model$classif.rpart$log
 ## Empty data.table (0 rows and 3 cols): stage,class,msg
 ## 
 ## $model$classif.rpart$train_time
-## [1] 0.08
+## [1] 0.04
 ## 
 ## $model$classif.rpart$train_task
 ## <TaskClassif:BankChurn> (13321 x 20)
@@ -986,7 +1520,7 @@ graph_learner_oversampler$state
 ## Empty data.table (0 rows and 3 cols): stage,class,msg
 ## 
 ## $train_time
-## [1] 0.15
+## [1] 0.13
 ## 
 ## $train_task
 ## <TaskClassif:BankChurn> (10127 x 20)
@@ -1009,7 +1543,7 @@ graph_learner_oversampler$state
 rpart.plot(graph_learner_oversampler$state$model$classif.rpart$model, cex = 0.6)
 ```
 
-![](churning_credit_card_customers_files/figure-html/unnamed-chunk-26-1.png)<!-- -->
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-58-1.png)<!-- -->
 
 
 ```r
@@ -1025,8 +1559,8 @@ oversampler_prediction_dt$confusion
 ```
 ##                    truth
 ## response            Attrited Customer Existing Customer
-##   Attrited Customer               284               181
-##   Existing Customer                38              1523
+##   Attrited Customer               278               152
+##   Existing Customer                44              1552
 ```
 
 
@@ -1036,7 +1570,7 @@ oversampler_prediction_dt$score(msr("classif.sensitivity"))
 
 ```
 ## classif.sensitivity 
-##           0.8819876
+##            0.863354
 ```
 
 ```r
@@ -1045,7 +1579,7 @@ oversampler_prediction_dt$score(msr("classif.ce"))
 
 ```
 ## classif.ce 
-##  0.1080948
+## 0.09674235
 ```
 
 ```r
@@ -1054,7 +1588,7 @@ oversampler_prediction_dt$score(msr("classif.fbeta"))
 
 ```
 ## classif.fbeta 
-##     0.7217281
+##     0.7393617
 ```
 
 
@@ -1078,7 +1612,7 @@ dt_undersampler_model2 <- undersampler_model2 %>>%
 dt_undersampler_model2$plot()
 ```
 
-![](churning_credit_card_customers_files/figure-html/unnamed-chunk-31-1.png)<!-- -->
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-63-1.png)<!-- -->
 
 
 ```r
@@ -1093,12 +1627,12 @@ graph_learner_undersampler_model2$train(task, train_set)
 ```
 
 ```
-## INFO  [15:49:52.908] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 2/3) 
-## INFO  [15:49:54.848] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 3/3) 
-## INFO  [15:49:56.782] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 1/3) 
-## INFO  [15:49:58.623] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 2/3) 
-## INFO  [15:49:58.753] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 1/3) 
-## INFO  [15:49:58.867] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 3/3)
+## INFO  [19:53:12.809] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 1/3) 
+## INFO  [19:53:14.677] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 2/3) 
+## INFO  [19:53:16.520] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 3/3) 
+## INFO  [19:53:18.257] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 1/3) 
+## INFO  [19:53:18.385] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 3/3) 
+## INFO  [19:53:18.493] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 2/3)
 ```
 
 ```
@@ -1193,13 +1727,13 @@ graph_learner_undersampler_model2$state
 ## Target node size:                 1 
 ## Variable importance mode:         none 
 ## Splitrule:                        gini 
-## OOB prediction error:             6.04 % 
+## OOB prediction error:             5.03 % 
 ## 
 ## $model$classif.ranger$log
 ## Empty data.table (0 rows and 3 cols): stage,class,msg
 ## 
 ## $model$classif.ranger$train_time
-## [1] 2.61
+## [1] 2.41
 ## 
 ## $model$classif.ranger$train_task
 ## <TaskClassif:BankChurn> (2664 x 20)
@@ -1265,77 +1799,77 @@ graph_learner_undersampler_model2$state
 ## 
 ## $model$classif.kknn$model$data
 ##          Attrition_Flag Avg_Open_To_Buy Avg_Utilization_Ratio Card_Category
-##    1: Existing Customer           17095                 0.050          Blue
-##    2: Existing Customer            2338                 0.356          Blue
-##    3: Attrited Customer           12871                 0.000          Blue
-##    4: Existing Customer            3344                 0.333          Blue
-##    5: Existing Customer            9605                 0.185          Blue
+##    1: Existing Customer            5589                 0.000          Blue
+##    2: Existing Customer            3980                 0.276          Blue
+##    3: Attrited Customer            1574                 0.000          Blue
+##    4: Existing Customer            3599                 0.000          Blue
+##    5: Attrited Customer           13450                 0.000          Blue
 ##   ---                                                                      
-## 2660: Existing Customer            2428                 0.415          Blue
-## 2661: Attrited Customer           34238                 0.008          Blue
-## 2662: Attrited Customer             144                 0.914          Blue
-## 2663: Existing Customer            2918                 0.199          Blue
-## 2664: Existing Customer            9675                 0.062          Blue
+## 2660: Existing Customer            1056                 0.536          Blue
+## 2661: Attrited Customer            2672                 0.000          Blue
+## 2662: Attrited Customer            1568                 0.261          Blue
+## 2663: Existing Customer            2263                 0.300          Blue
+## 2664: Attrited Customer             804                 0.462          Blue
 ##       Contacts_Count_12_mon Credit_Limit Customer_Age Dependent_count
-##    1:                     2        18001           41               4
-##    2:                     3         3632           48               2
-##    3:                     2        12871           38               2
-##    4:                     3         5015           34               2
-##    5:                     1        11782           44               4
+##    1:                     2         5589           38               2
+##    2:                     4         5497           36               3
+##    3:                     3         1574           30               0
+##    4:                     2         3599           49               0
+##    5:                     3        13450           42               3
 ##   ---                                                                
-## 2660:                     4         4147           42               3
-## 2661:                     4        34516           53               4
-## 2662:                     3         1665           51               1
-## 2663:                     3         3642           38               3
-## 2664:                     1        10317           52               1
+## 2660:                     3         2275           51               1
+## 2661:                     3         2672           49               4
+## 2662:                     3         2122           61               0
+## 2663:                     3         3234           34               3
+## 2664:                     3         1495           51               3
 ##       Education_Level Gender Income_Category Marital_Status
-##    1:   Post-Graduate      M     $60K - $80K        Married
-##    2:         Unknown      F  Less than $40K        Married
-##    3:         Unknown      M     $60K - $80K         Single
-##    4:     High School      F  Less than $40K         Single
-##    5:         Unknown      M    $80K - $120K         Single
+##    1:         Unknown      F  Less than $40K        Married
+##    2:     High School      M     $60K - $80K        Married
+##    3:        Graduate      F  Less than $40K         Single
+##    4:      Uneducated      M     $60K - $80K        Married
+##    5:         College      M     $60K - $80K        Married
 ##   ---                                                      
-## 2660:     High School      M    $80K - $120K         Single
-## 2661:         Unknown      M         $120K +         Single
-## 2662:     High School      F  Less than $40K        Married
-## 2663:         Unknown      M    $80K - $120K         Single
-## 2664:         College      F         Unknown        Married
+## 2660:   Post-Graduate      F     $40K - $60K         Single
+## 2661:         Unknown      F         Unknown         Single
+## 2662:        Graduate      F  Less than $40K        Married
+## 2663:      Uneducated      F  Less than $40K         Single
+## 2664:        Graduate      F  Less than $40K       Divorced
 ##       Months_Inactive_12_mon Months_on_book Total_Amt_Chng_Q4_Q1
-##    1:                      3             32                0.620
-##    2:                      1             41                0.924
-##    3:                      3             33                0.598
-##    4:                      1             21                0.689
-##    5:                      2             26                0.875
+##    1:                      2             36                0.787
+##    2:                      2             36                0.624
+##    3:                      3             36                0.582
+##    4:                      3             38                0.738
+##    5:                      3             34                0.742
 ##   ---                                                           
-## 2660:                      5             30                0.875
-## 2661:                      3             48                0.817
-## 2662:                      3             43                0.874
-## 2663:                      1             30                0.680
-## 2664:                      3             40                0.553
+## 2660:                      1             46                0.639
+## 2661:                      3             31                1.038
+## 2662:                      3             56                0.857
+## 2663:                      2             26                0.790
+## 2664:                      3             41                0.705
 ##       Total_Ct_Chng_Q4_Q1 Total_Relationship_Count Total_Revolving_Bal
-##    1:               0.471                        5                 906
-##    2:               0.686                        6                1294
-##    3:               0.606                        2                   0
-##    4:               0.878                        6                1671
-##    5:               0.692                        1                2177
+##    1:               0.711                        4                   0
+##    2:               0.357                        5                1517
+##    3:               0.788                        5                   0
+##    4:               0.594                        1                   0
+##    5:               0.059                        3                   0
 ##   ---                                                                 
-## 2660:               0.571                        4                1719
-## 2661:               0.400                        3                 278
-## 2662:               0.452                        4                1521
-## 2663:               0.837                        5                 724
-## 2664:               0.875                        5                 642
+## 2660:               0.600                        4                1219
+## 2661:               0.500                        6                   0
+## 2662:               0.133                        3                 554
+## 2663:               0.868                        4                 971
+## 2664:               0.556                        5                 691
 ##       Total_Trans_Amt Total_Trans_Ct
-##    1:            1194             25
-##    2:            4339             86
-##    3:            2413             53
-##    4:            3161             77
-##    5:           16605            110
+##    1:            4064             77
+##    2:            1981             38
+##    3:            2560             59
+##    4:           13324            110
+##    5:            1000             18
 ##   ---                               
-## 2660:            1776             44
-## 2661:            3029             49
-## 2662:            2878             45
-## 2663:            4517             79
-## 2664:            3939             60
+## 2660:            4807             72
+## 2661:            2576             39
+## 2662:             949             17
+## 2663:            3989             71
+## 2664:            2552             42
 ## 
 ## $model$classif.kknn$model$pars
 ## $model$classif.kknn$model$pars$k
@@ -1350,7 +1884,7 @@ graph_learner_undersampler_model2$state
 ## Empty data.table (0 rows and 3 cols): stage,class,msg
 ## 
 ## $model$classif.kknn$train_time
-## [1] 0.02
+## [1] 0
 ## 
 ## $model$classif.kknn$train_task
 ## <TaskClassif:BankChurn> (2664 x 20)
@@ -1419,14 +1953,14 @@ graph_learner_undersampler_model2$state
 ##       * denotes terminal node
 ## 
 ## 1) root 2664 1305 Existing Customer (0.48986486 0.51013514)  
-##   2) classif.ranger.response=Attrited Customer 1331   99 Attrited Customer (0.92561983 0.07438017) *
-##   3) classif.ranger.response=Existing Customer 1333   73 Existing Customer (0.05476369 0.94523631) *
+##   2) classif.ranger.response=Attrited Customer 1311   75 Attrited Customer (0.94279176 0.05720824) *
+##   3) classif.ranger.response=Existing Customer 1353   69 Existing Customer (0.05099778 0.94900222) *
 ## 
 ## $model$classif.rpart$log
 ## Empty data.table (0 rows and 3 cols): stage,class,msg
 ## 
 ## $model$classif.rpart$train_time
-## [1] 0.03
+## [1] 0.01
 ## 
 ## $model$classif.rpart$train_task
 ## <TaskClassif:BankChurn> (2664 x 3)
@@ -1441,7 +1975,7 @@ graph_learner_undersampler_model2$state
 ## Empty data.table (0 rows and 3 cols): stage,class,msg
 ## 
 ## $train_time
-## [1] 9.18
+## [1] 8.67
 ## 
 ## $train_task
 ## <TaskClassif:BankChurn> (10127 x 20)
@@ -1471,7 +2005,7 @@ rpart.plot(graph_learner_undersampler_model2$state$model$classif.rpart$model)
 ##     or rebuild the rpart model with model=TRUE.
 ```
 
-![](churning_credit_card_customers_files/figure-html/unnamed-chunk-35-1.png)<!-- -->
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-67-1.png)<!-- -->
 
 
 ```r
@@ -1492,8 +2026,8 @@ undersampler_model2_prediction_dt$confusion
 ```
 ##                    truth
 ## response            Attrited Customer Existing Customer
-##   Attrited Customer               308               104
-##   Existing Customer                14              1600
+##   Attrited Customer               311               112
+##   Existing Customer                11              1592
 ```
 
 
@@ -1504,7 +2038,7 @@ undersampler_model2_prediction_dt$score(msr("classif.sensitivity"))
 
 ```
 ## classif.sensitivity 
-##           0.9565217
+##           0.9658385
 ```
 
 ```r
@@ -1513,7 +2047,7 @@ undersampler_model2_prediction_dt$score(msr("classif.acc"))
 
 ```
 ## classif.acc 
-##   0.9417572
+##   0.9392892
 ```
 
 ```r
@@ -1522,7 +2056,7 @@ undersampler_model2_prediction_dt$score(msr("classif.fbeta"))
 
 ```
 ## classif.fbeta 
-##     0.8392371
+##     0.8348993
 ```
 
 
@@ -1540,38 +2074,38 @@ dt_bm_results <- benchmark(dt_benchmark)
 ```
 
 ```
-## INFO  [15:50:00.588] [mlr3]  Running benchmark with 12 resampling iterations 
-## INFO  [15:50:00.599] [mlr3]  Applying learner 'undersampler.classif.rpart' on task 'BankChurn' (iter 1/3) 
-## INFO  [15:50:00.721] [mlr3]  Applying learner 'undersampler_model2.classif.ranger.classif.kknn.featureunion.classif.rpart' on task 'BankChurn' (iter 2/3) 
-## INFO  [15:50:02.849] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 1/3) 
-## INFO  [15:50:04.208] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 2/3) 
-## INFO  [15:50:05.552] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 3/3) 
-## INFO  [15:50:07.405] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 1/3) 
-## INFO  [15:50:07.498] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 2/3) 
-## INFO  [15:50:07.593] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 3/3) 
-## INFO  [15:50:09.104] [mlr3]  Applying learner 'undersampler_model2.classif.ranger.classif.kknn.featureunion.classif.rpart' on task 'BankChurn' (iter 3/3) 
-## INFO  [15:50:11.039] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 3/3) 
-## INFO  [15:50:12.637] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 1/3) 
-## INFO  [15:50:14.251] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 2/3) 
-## INFO  [15:50:15.717] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 1/3) 
-## INFO  [15:50:15.814] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 2/3) 
-## INFO  [15:50:15.912] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 3/3) 
-## INFO  [15:50:17.668] [mlr3]  Applying learner 'oversampler.classif.rpart' on task 'BankChurn' (iter 2/3) 
-## INFO  [15:50:18.051] [mlr3]  Applying learner 'nop.classif.rpart' on task 'BankChurn' (iter 3/3) 
-## INFO  [15:50:18.158] [mlr3]  Applying learner 'nop.classif.rpart' on task 'BankChurn' (iter 1/3) 
-## INFO  [15:50:18.276] [mlr3]  Applying learner 'nop.classif.rpart' on task 'BankChurn' (iter 2/3) 
-## INFO  [15:50:18.381] [mlr3]  Applying learner 'oversampler.classif.rpart' on task 'BankChurn' (iter 1/3) 
-## INFO  [15:50:18.562] [mlr3]  Applying learner 'undersampler.classif.rpart' on task 'BankChurn' (iter 3/3) 
-## INFO  [15:50:18.668] [mlr3]  Applying learner 'undersampler.classif.rpart' on task 'BankChurn' (iter 2/3) 
-## INFO  [15:50:18.782] [mlr3]  Applying learner 'undersampler_model2.classif.ranger.classif.kknn.featureunion.classif.rpart' on task 'BankChurn' (iter 1/3) 
-## INFO  [15:50:20.844] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 2/3) 
-## INFO  [15:50:22.299] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 3/3) 
-## INFO  [15:50:23.975] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 1/3) 
-## INFO  [15:50:25.533] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 3/3) 
-## INFO  [15:50:25.631] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 1/3) 
-## INFO  [15:50:25.727] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 2/3) 
-## INFO  [15:50:27.232] [mlr3]  Applying learner 'oversampler.classif.rpart' on task 'BankChurn' (iter 3/3) 
-## INFO  [15:50:27.420] [mlr3]  Finished benchmark
+## INFO  [19:53:20.292] [mlr3]  Running benchmark with 12 resampling iterations 
+## INFO  [19:53:20.303] [mlr3]  Applying learner 'oversampler.classif.rpart' on task 'BankChurn' (iter 2/3) 
+## INFO  [19:53:20.498] [mlr3]  Applying learner 'oversampler.classif.rpart' on task 'BankChurn' (iter 1/3) 
+## INFO  [19:53:20.669] [mlr3]  Applying learner 'undersampler.classif.rpart' on task 'BankChurn' (iter 2/3) 
+## INFO  [19:53:20.785] [mlr3]  Applying learner 'undersampler_model2.classif.ranger.classif.kknn.featureunion.classif.rpart' on task 'BankChurn' (iter 1/3) 
+## INFO  [19:53:22.626] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 2/3) 
+## INFO  [19:53:23.963] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 3/3) 
+## INFO  [19:53:25.475] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 1/3) 
+## INFO  [19:53:26.842] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 1/3) 
+## INFO  [19:53:27.156] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 2/3) 
+## INFO  [19:53:27.259] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 3/3) 
+## INFO  [19:53:28.694] [mlr3]  Applying learner 'undersampler.classif.rpart' on task 'BankChurn' (iter 1/3) 
+## INFO  [19:53:28.802] [mlr3]  Applying learner 'nop.classif.rpart' on task 'BankChurn' (iter 2/3) 
+## INFO  [19:53:28.902] [mlr3]  Applying learner 'undersampler_model2.classif.ranger.classif.kknn.featureunion.classif.rpart' on task 'BankChurn' (iter 3/3) 
+## INFO  [19:53:30.942] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 2/3) 
+## INFO  [19:53:32.261] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 1/3) 
+## INFO  [19:53:33.572] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 3/3) 
+## INFO  [19:53:35.091] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 2/3) 
+## INFO  [19:53:35.190] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 1/3) 
+## INFO  [19:53:35.291] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 3/3) 
+## INFO  [19:53:37.149] [mlr3]  Applying learner 'undersampler_model2.classif.ranger.classif.kknn.featureunion.classif.rpart' on task 'BankChurn' (iter 2/3) 
+## INFO  [19:53:39.042] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 2/3) 
+## INFO  [19:53:40.391] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 3/3) 
+## INFO  [19:53:41.908] [mlr3]  Applying learner 'classif.ranger' on task 'BankChurn' (iter 1/3) 
+## INFO  [19:53:43.314] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 3/3) 
+## INFO  [19:53:43.411] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 1/3) 
+## INFO  [19:53:43.522] [mlr3]  Applying learner 'classif.kknn' on task 'BankChurn' (iter 2/3) 
+## INFO  [19:53:44.974] [mlr3]  Applying learner 'nop.classif.rpart' on task 'BankChurn' (iter 1/3) 
+## INFO  [19:53:45.075] [mlr3]  Applying learner 'nop.classif.rpart' on task 'BankChurn' (iter 3/3) 
+## INFO  [19:53:45.187] [mlr3]  Applying learner 'oversampler.classif.rpart' on task 'BankChurn' (iter 3/3) 
+## INFO  [19:53:45.363] [mlr3]  Applying learner 'undersampler.classif.rpart' on task 'BankChurn' (iter 3/3) 
+## INFO  [19:53:45.457] [mlr3]  Finished benchmark
 ```
 
 
@@ -1590,10 +2124,10 @@ as.data.table(
 
 |learner_id                                                                 | classif.ce| classif.sensitivity| classif.fbeta|
 |:--------------------------------------------------------------------------|----------:|-------------------:|-------------:|
-|nop.classif.rpart                                                          |  0.0678388|           0.7864758|     0.7880458|
-|undersampler.classif.rpart                                                 |  0.1041784|           0.8780966|     0.7306998|
-|oversampler.classif.rpart                                                  |  0.1023016|           0.8910848|     0.7367126|
-|undersampler_model2.classif.ranger.classif.kknn.featureunion.classif.rpart |  0.0615189|           0.9545885|     0.8334113|
+|nop.classif.rpart                                                          |  0.0684307|           0.7608696|     0.7806408|
+|undersampler.classif.rpart                                                 |  0.1084228|           0.9021195|     0.7276360|
+|oversampler.classif.rpart                                                  |  0.1012136|           0.8941341|     0.7395866|
+|undersampler_model2.classif.ranger.classif.kknn.featureunion.classif.rpart |  0.0616175|           0.9583127|     0.8331954|
 
 
 ```r
@@ -1611,5 +2145,5 @@ sensitivity_plot <- autoplot(dt_bm_results, measure = msr("classif.sensitivity")
 plot_grid(classification_error_plot, sensitivity_plot)
 ```
 
-![](churning_credit_card_customers_files/figure-html/unnamed-chunk-41-1.png)<!-- -->
+![](churning_credit_card_customers_files/figure-html/unnamed-chunk-73-1.png)<!-- -->
 

@@ -11,9 +11,15 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-# Background 
 
-Customer churn is the loss/turnover of a client. For this analysis, the goal is to predict/classify customers who will churn. We will begin by importing the necessary packages and performing some exploratory data analysis. 
+#### Still working, but have a read, the purpose and success of analsis is obvious. 
+
+
+# Background
+
+Customer churn is the loss/turnover of a client. For this analysis, the goal is to predict/classify customers who will churn. We will begin with exploratory data analysis to get a comprehensive understanding of the data, and then perform pre-processing if necessary, and delve into model development and evaluation. 
+
+I will be performing the analysis in R, and additionally leverage some of its external packages for analysis and visualizations. 
 
 ```{r warning=F, message=F}
 # Import and load packages
@@ -39,6 +45,60 @@ bank_churn <- fread("C:/Users/diji_/Desktop/Data Science/Projects/Bank Churn/Ban
 bank_churn <- bank_churn[, c(-22, -23)]
 ```
 
+Let us take a peek at the data 
+
+```{r}
+# Plot the profile of the data
+DataExplorer::plot_str(bank_churn)
+```
+
+
+```{r}
+# Print the first 3 rows of the data 
+bank_churn[1:3, ] 
+```
+
+Below is a table informing what the different features mean. 
+
+```{r echo = F}
+# Print names of columns in the data table 
+variable_names <- names(bank_churn)
+
+# Meaning of names
+variable_meaning <- c("Client number", "Whether or not the customer churned", "Age of customer", "Sex of customer", "Number of dependents", 
+  "Educational qualification of the account holder", "Married, Single, Divorced or Unknown", "Annual income category of the account holder", "Type of card", "Period of relationship with the bank", "Total number of products held by the customer", "Number of months inactive in the last 12 months", "No of contacts in the last 12 months", "Credit limit on the credit card", "Total revolving balance on the credit card", "Open to buy credit line (Average of the last 12 months)", "Change in transaction amount (Q4/Q1)", "Total transaction amount in the last 12 months", "Total transaction count in the last 12 months", "Change in transaction count (Q4/Q1)", "Average card utilization ratio")
+
+# Print the variable names and their meanings
+data.table(variable_names, variable_meaning) %>% setnames(c("Variable Name", "Variable Meaning")) %>% kable()
+```
+
+We have some bit of features here and our goal is to predict whether or not a customer will churn, as such our target feature is the Attrition_Flag. The Attrition Flag is a categorical feature that informs whether or not the customer churned, so let us get information on this feature, and make a visual representation on the proportions.
+
+```{r}
+# Create a table indicating churn proportions
+churn_proportion <- table(bank_churn$Attrition_Flag) %>% data.table() %>% setnames(new = c("Customer Group", "Count"))
+churn_proportion$`Percentage` <- round((churn_proportion$Count/sum(churn_proportion$Count))*100, 2)
+churn_proportion %>% kable()
+
+# Make pie chart of churn proportions 
+pie(churn_proportion$Count, labels = paste(churn_proportion$`Customer Group`, paste(churn_proportion$Percentage, sep = "", "%"), sep = ", "), col = c("red", "burlywood"), main = "Percantage of credit card customers who have churned.\n Total number of credit card customers: 10127")
+```
+
+As illustrated in the pie chart, we have quite the imbalanced target feature with Attrited customers being 16.07% of the data, and the other 83.93% representing Existing customers. This gives something to think about through analysis and model development. 
+
+Our goal, as mentioned earlier, is to develop a model that can effectively predict whether or not a customer will churn. That said, a model that better predicts the churning of a customer will serve better than a model the predicts the customer will stay. This piece of information will be key when evaluating model performance. 
+
+As a case scenario, say we have a model that predicts every customer will remain; if we test this model on our complete data set, and evaluate simply using accuracy, then our model will be right 83.93% of the time...simply misleading benchmark for evaluations give our model may very well be useless in detecting/predicting customer who will churn. In essence, we must keep our analytics goal (i.e., predicting customers who churn) in mind. 
+
+Let us continue with our data exploration and pre-processing. 
+
+```{r}
+# Get the class of each variable
+data.table(`Variable Name` = variable_names, `Variable Class` = lapply(bank_churn, class)) %>% t()
+```
+
+We have to convert character variables to factors. We also have to convert some variables that are declared as integers to numeric variables i.e., Customer_Age (I think of age as a continuum), Total_Revolving_Bal, and Total_Trans_Amt
+
 ```{r}
 # Select the character variables to be converted factors
 character_variables <- c("Attrition_Flag", "Gender", "Education_Level", "Marital_Status", "Income_Category", "Card_Category")
@@ -51,10 +111,285 @@ numeric_variables <- c("Customer_Age", "Total_Revolving_Bal", "Total_Trans_Amt")
 
 # Convert some integers to numeric
 bank_churn[, (numeric_variables) := lapply(.SD, as.numeric), .SDcols = numeric_variables]
-
-# Verify that classes have been appropriately set 
-lapply(bank_churn, class)
 ```
+
+```{r}
+# Verify that classes have been appropriately set 
+lapply(bank_churn, class) %>% t()
+```
+
+Thus far, the only input feature I see that is not necessary to be included in our model is the "CLIENTNUM", The CLIENTNUM is just an identifier. I won't remove it just yet though, in accordance with the theme of EDA I'll make a plot to see the relationship between the client ID and Attrition Flag. We have no time variable to evaluate the churning through time. So, my maybe flawed logic is that the recent customers have higher client numbers than earlier customers...you know, customer 1, customer 2, ...., customer *n*, etc. 
+
+```{r}
+ggplot(data = bank_churn) +
+  geom_point(aes(x = CLIENTNUM, y = Attrition_Flag, color = Attrition_Flag)) +
+  xlab("Client Number") +
+  ylab("Customer Group") +
+  theme_classic()
+```
+
+Damn, no cigar! But yes, visually, we confirm that the Client Number has no value in informing whether or not a client will churn. 
+
+Let us explore our numeric input features 
+
+```{r}
+# Check correlation among variables 
+correlation_data <- bank_churn[, !c("CLIENTNUM")] %>% 
+  keep(is.numeric) %>% 
+  as.matrix() %>%
+  rcorr() 
+```
+
+```{r}
+# Make correlation plot 
+corrplot::corrplot(correlation_data$r, type = "lower", p.mat = correlation_data$P, sig.level = 0.05, order = "alphabet", tl.cex = 0.7)
+```
+
+From above, we see that not too many quantitative variables are highly and significantly correlated. The correlated variables are however understandably related and include: 
+
+- Customer Age and Months on book (R^2^ = 0.789, p-value < 0.05)
+- Open to buy credit line and Credit limit (R^2^ = 0.996, p-value < 0.05)
+- Average utilization ratio and Total revolving balance (R^2^ = 0.624, p-value < 0.05)
+- Total transaction count and Total transaction amount (R^2^ = 0.0.807, p-value < 0.05)
+
+The above information should be noted when making a model as it violates some assumptions that underlie some methods. 
+
+How about the distribution of the numerical features as they relate to Attrition Flag? 
+
+```{r}
+# Density plot illustration distribution of total transaction amount
+trans_amnt_density <- ggplot(data = bank_churn, aes(x = Total_Trans_Amt, color = Attrition_Flag, fill = Attrition_Flag)) + 
+  geom_density(alpha = 0.5) + 
+  theme_classic() +
+  theme(legend.position = "none")
+
+# Box plot illustration distribution of total transaction count 
+trans_amnt_boxplot <- ggplot(data = bank_churn, aes(x = Total_Trans_Amt, y = Attrition_Flag, fill = Attrition_Flag)) +
+  geom_boxplot() +
+  theme_classic() +
+  theme(legend.position = "none")
+
+plot_grid(trans_amnt_density, trans_amnt_boxplot, ncol = 1)
+```
+
+Based on the above plot, we see that clients who churn mostly have lower transaction amounts that those who do not churn. There are outliers in both categories, and these outliers have increased transaction amounts. Both groups have a right skew, and as shown below, taking the log10 of these groups somewhat normalizes their distribution. Another piece of information may be useful depending on the model we build. 
+
+```{r}
+# Density plot illustration distribution of log total transaction amount
+log_trans_amnt_density <- ggplot(data = bank_churn, aes(x = log10(Total_Trans_Amt), color = Attrition_Flag, fill = Attrition_Flag)) + 
+  geom_density(alpha = 0.5) + 
+  theme_classic() +
+  theme(legend.position = "none")
+
+# Box plot illustration distribution of log total transaction amount
+log_trans_amnt_boxplot <- ggplot(data = bank_churn, aes(x = log10(Total_Trans_Amt), y = Attrition_Flag, fill = Attrition_Flag)) +
+  geom_boxplot() +
+  theme_classic() +
+  theme(legend.position = "none")
+
+plot_grid(log_trans_amnt_density, log_trans_amnt_boxplot, ncol = 1)
+```
+
+Below are the plots/distribution of the other numerical features. As expected, the total transaction count follows a similar distribution to the total transaction amount given the relationship between these variables.
+
+```{r}
+# Density plot illustration distribution of total transaction count 
+ggplot(bank_churn, aes(x = Total_Trans_Ct, color = Attrition_Flag, fill = Attrition_Flag)) + 
+  geom_density(alpha = 0.5) + 
+  theme_classic()
+
+# Density plot illustration distribution of Change in transaction count (Q4/Q1)
+ggplot(bank_churn, aes(x = Total_Ct_Chng_Q4_Q1, color = Attrition_Flag, fill = Attrition_Flag)) + 
+  geom_density(alpha = 0.5) + 
+  theme_classic()
+
+# Density plot illustration distribution of Change in transaction amount (Q4/Q1) 
+ggplot(bank_churn, aes(x = Total_Amt_Chng_Q4_Q1, color = Attrition_Flag, fill = Attrition_Flag)) + 
+  geom_density(alpha = 0.5) + 
+  theme_classic()
+
+# Density plot illustration distribution of Total revolving balance on the credit card
+ggplot(bank_churn, aes(x = Total_Revolving_Bal, color = Attrition_Flag, fill = Attrition_Flag)) + 
+  geom_density(alpha = 0.5) + 
+  theme_classic()
+
+```
+
+Let us explore the categorical features. 
+```{r}
+DataExplorer::plot_bar(bank_churn)
+```
+
+The bar plot also informs that with the exception of Male:Female and Married:Single, the proportions of categories within the data are not evenly distributed. Let us get the actual metrics on the categorical features. 
+
+```{r}
+# Metrics on the categorical features
+Hmisc::describe(bank_churn[, c("Gender", "Education_Level", "Marital_Status", "Income_Category", "Card_Category")])
+```
+
+The most striking bit of information in here is that 93.2% of the individuals on which the information was collected have Blue cards. It will be surprising, nay, highly improbable that the card category will be an important feature in the data given the proportion of people who churned. 
+
+Now we explore the relationship between categorical input features and target feature 
+
+As shown below, our data contains more females than males, although of relatively similar proportions; also, of our total clients, 9.18% were females who churned while 6.88% were males who churned. We will observe the other categorical features in similar manner, searching for categories with high attrition observations. It should however be noted that this method of exploration does not account for interaction among features. 
+
+```{r}
+table(bank_churn$Gender, bank_churn$Attrition_Flag)
+```
+
+```{r}
+gender_attrition <- bank_churn[, by = .(Gender, Attrition_Flag), .N] %>% 
+  .[order(Gender)] %>% setnames(old = "N", new = "Count")
+
+gender_attrition_stack <- ggplot(gender_attrition, aes(fill = Attrition_Flag, y = Count, x = Gender)) +
+  geom_bar(position = "stack", stat = "identity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+gender_attrition_fill <- ggplot(gender_attrition, aes(fill = Attrition_Flag, y = Count, x = Gender)) +
+  geom_bar(position = "fill", stat = "identity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+gender_attrition_legend <- get_legend(gender_attrition_stack + theme(legend.position = "right"))
+```
+
+```{r}
+plot_grid(gender_attrition_stack, gender_attrition_fill, gender_attrition_legend, ncol = 3)
+```
+
+
+
+
+
+```{r}
+table(bank_churn$Education_Level, bank_churn$Attrition_Flag)
+```
+
+```{r}
+Education_Level_attrition <- bank_churn[, by = .(Education_Level, Attrition_Flag), .N] %>% 
+  .[order(Education_Level)] %>% setnames(old = "N", new = "Count")
+
+Education_Level_attrition_stack <- ggplot(Education_Level_attrition, aes(fill = Attrition_Flag, y = Count, x = Education_Level)) +
+  geom_bar(position = "stack", stat = "identity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+Education_Level_attrition_fill <- ggplot(Education_Level_attrition, aes(fill = Attrition_Flag, y = Count, x = Education_Level)) +
+  geom_bar(position = "fill", stat = "identity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+Education_Level_attrition_legend <- get_legend(Education_Level_attrition_stack + theme(legend.position = "right"))
+```
+
+```{r}
+plot_grid(Education_Level_attrition_stack, Education_Level_attrition_fill, Education_Level_attrition_legend, ncol = 3)
+```
+
+
+
+```{r}
+table(bank_churn$Marital_Status, bank_churn$Attrition_Flag)
+```
+
+```{r}
+Marital_Status_attrition <- bank_churn[, by = .(Marital_Status, Attrition_Flag), .N] %>% 
+  .[order(Marital_Status)] %>% setnames(old = "N", new = "Count")
+
+Marital_Status_attrition_stack <- ggplot(Marital_Status_attrition, aes(fill = Attrition_Flag, y = Count, x = Marital_Status)) +
+  geom_bar(position = "stack", stat = "identity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+Marital_Status_attrition_fill <- ggplot(Marital_Status_attrition, aes(fill = Attrition_Flag, y = Count, x = Marital_Status)) +
+  geom_bar(position = "fill", stat = "identity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+Marital_Status_attrition_legend <- get_legend(Marital_Status_attrition_stack + theme(legend.position = "right"))
+```
+
+```{r}
+plot_grid(Marital_Status_attrition_stack, Marital_Status_attrition_fill, Marital_Status_attrition_legend, ncol = 3)
+```
+
+
+```{r}
+table(bank_churn$Income_Category, bank_churn$Attrition_Flag)
+```
+
+```{r}
+Income_Category_attrition <- bank_churn[, by = .(Income_Category, Attrition_Flag), .N] %>% 
+  .[order(Income_Category)] %>% setnames(old = "N", new = "Count")
+
+Income_Category_attrition_stack <- ggplot(Income_Category_attrition, aes(fill = Attrition_Flag, y = Count, x = Income_Category)) +
+  geom_bar(position = "stack", stat = "identity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+Income_Category_attrition_fill <- ggplot(Income_Category_attrition, aes(fill = Attrition_Flag, y = Count, x = Income_Category)) +
+  geom_bar(position = "fill", stat = "identity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+Income_Category_attrition_legend <- get_legend(Income_Category_attrition_stack + theme(legend.position = "right"))
+```
+
+```{r}
+plot_grid(Income_Category_attrition_stack, Income_Category_attrition_fill, Income_Category_attrition_legend, ncol = 3)
+```
+
+
+
+
+```{r}
+table(bank_churn$Card_Category, bank_churn$Attrition_Flag)
+```
+
+```{r}
+Card_Category_attrition <- bank_churn[, by = .(Card_Category, Attrition_Flag), .N] %>% 
+  .[order(Card_Category)] %>% setnames(old = "N", new = "Count")
+
+Card_Category_attrition_stack <- ggplot(Card_Category_attrition, aes(fill = Attrition_Flag, y = Count, x = Card_Category)) +
+  geom_bar(position = "stack", stat = "identity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+Card_Category_attrition_fill <- ggplot(Card_Category_attrition, aes(fill = Attrition_Flag, y = Count, x = Card_Category)) +
+  geom_bar(position = "fill", stat = "identity") +
+  theme_classic() +
+  theme(legend.position = "none")
+
+Card_Category_attrition_legend <- get_legend(Card_Category_attrition_stack + theme(legend.position = "right"))
+```
+
+```{r}
+plot_grid(Card_Category_attrition_stack, Card_Category_attrition_fill, Card_Category_attrition_legend, ncol = 3)
+```
+
+
+
+
+```{r}
+categorical_attrition <- bank_churn[, by = .(Gender, Education_Level, Marital_Status, Income_Category, Card_Category, Attrition_Flag), .N] %>% setnames(old = "N", new = "Count") %>% .[order(Attrition_Flag, -Count)]
+```
+
+```{r}
+attrited_customer <- categorical_attrition[Attrition_Flag == "Attrited Customer"] %>% 
+  .[, proportion_of_total := (Count/sum(Count))*100]
+```
+
+```{r}
+# Print out the top 10 observations that account for attrited customers 
+attrited_customer[1:10, !c("Attrition_Flag")] %>% kable()
+```
+
+The observations shown above illustrate the characteristics of 26% of our churned customers. We can further evaluate the table containing 100% of our churned customers to evaluate which categorical features (after encoding) account for most of the variation among the churned customers. One thing is for certain though, the Card Category doesn't contain most of the variation within the data. 
+
+# Modelling 
+
+Armed with some information from exploratory analysis, let us proceed to model development. For this analysis, I'll like to use a decision tree because of its simplicity to comprehend when understanding the relationship between input features and the target variable. I'll also focus on improving the performance of this decision tree albeit by utilizing ensemble methods (i.e., following random forests and k-nearest neighbours). 
 
 ```{r}
 # Create the task 
@@ -69,11 +404,10 @@ task$set_col_roles("CLIENTNUM", roles = "name")
 
 ```{r}
 # Explore the task 
-as.data.table(task$col_info)
+as.data.table(task$col_info) %>% kable()
 task$col_roles
 table(task$truth()) # Class imbalance with Attrited customers being 1/5 less than Existing customers 
 task$positive
-Hmisc::describe(as.data.table(task))
 ```
 
 ```{r}
@@ -244,7 +578,7 @@ dt_undersampler_model2$plot()
 graph_learner_undersampler_model2 <- GraphLearner$new(dt_undersampler_model2)
 ```
 
-```{r}
+```{r warning = F, message = F}
 # Train the undersampler_model2 decision tree model
 graph_learner_undersampler_model2$train(task, train_set)
 ```
@@ -275,7 +609,6 @@ undersampler_model2_prediction_dt$score(msr("classif.sensitivity"))
 undersampler_model2_prediction_dt$score(msr("classif.acc"))
 undersampler_model2_prediction_dt$score(msr("classif.fbeta"))
 ```
-
 
 ```{r warning = F, message = F}
 # Benchmarking 
